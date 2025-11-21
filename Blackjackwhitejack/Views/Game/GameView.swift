@@ -33,17 +33,18 @@ struct GameView: View {
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 📊 STATE PROPERTIES                                                  │
     // │                                                                      │
-    // │ For Phase 1, we're using placeholder state                          │
-    // │ Phase 2 will replace this with GameViewModel                        │
+    // │ Phase 2: GameViewModel is now the single source of truth            │
+    // │ All game logic, state, and data flows through this view model       │
     // └─────────────────────────────────────────────────────────────────────┘
 
-    @State private var bankroll: Double = 10000
-    @State private var currentBet: Double = 0
+    @StateObject private var viewModel = GameViewModel(
+        numberOfDecks: 6,          // Ruby dealer default (Phase 3 will make this dynamic)
+        startingBankroll: 10000,   // $10,000 AUD default
+        minimumBet: 10             // $10 AUD minimum
+    )
 
-    // Placeholder hands for Phase 1 demo
-    @State private var playerHand: Hand = Hand.from(["A♠", "K♥"])
-    @State private var dealerHand: Hand = Hand.from(["10♦"])
-    @State private var dealerHoleCard: Card? = Card(rank: .seven, suit: .clubs)
+    // UI state for betting slider
+    @State private var betSliderValue: Double = 10
 
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 🎨 BODY - Main Layout                                                │
@@ -61,18 +62,37 @@ struct GameView: View {
 
                 Spacer()
 
-                // Dealer's area
-                dealerArea
+                // Conditional content based on game state
+                switch viewModel.gameState {
+                case .betting, .gameOver:
+                    bettingArea
+                case .dealing, .playerTurn, .dealerTurn:
+                    // Show game in progress
+                    VStack {
+                        Spacer()
+                        dealerArea
+                        Spacer()
+                        playerArea
+                        Spacer()
+                    }
+                case .result:
+                    // Show result and next hand button
+                    VStack {
+                        Spacer()
+                        dealerArea
+                        Spacer()
+                        playerArea
+                        Spacer()
+                        resultArea
+                    }
+                }
 
                 Spacer()
 
-                // Player's area
-                playerArea
-
-                Spacer()
-
-                // Action buttons area (placeholder for Phase 2)
-                actionButtonsArea
+                // Action buttons (shown during player's turn)
+                if viewModel.gameState == .playerTurn {
+                    actionButtonsArea
+                }
 
                 // Swipe indicator
                 swipeIndicator
@@ -129,7 +149,7 @@ struct GameView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 // Amount
-                Text(formatCurrency(bankroll))
+                Text(formatCurrency(viewModel.bankroll))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.chipGradient)
 
@@ -150,29 +170,30 @@ struct GameView: View {
 
     private var dealerArea: some View {
         VStack(spacing: 12) {
-            // "Dealer" label
-            Text("Dealer")
-                .font(.headline)
-                .foregroundColor(.mediumGrey)
+            // Hand total (or "?" if hole card hidden)
+            Text(dealerDisplayTotal)
+                .font(.title2)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
 
             // Dealer's cards
             HStack(spacing: -30) {
                 // Visible card(s)
-                ForEach(dealerHand.cards) { card in
+                ForEach(viewModel.dealerHand.cards) { card in
                     CardView(card: card, size: .standard)
                 }
 
-                // Hole card (face down)
-                if let holeCard = dealerHoleCard {
+                // Hole card (face down during player turn)
+                if viewModel.gameState == .playerTurn || viewModel.gameState == .dealing,
+                   let holeCard = viewModel.dealerHoleCard {
                     CardView(card: holeCard, isFaceDown: true, size: .standard)
                 }
             }
 
-            // Hand total (or "?" if hole card hidden)
-            Text(dealerHoleCard != nil ? "?" : dealerHand.displayString)
-                .font(.title2)
-                .fontWeight(.semibold)
-                .foregroundColor(.white)
+            // "Dealer" label
+            Text("Dealer")
+                .font(.headline)
+                .foregroundColor(.mediumGrey)
         }
     }
 
@@ -185,23 +206,23 @@ struct GameView: View {
 
     private var playerArea: some View {
         VStack(spacing: 12) {
-            // Hand total
-            Text(playerHand.displayString)
-                .font(.title)
-                .fontWeight(.bold)
-                .foregroundColor(handTotalColor)
+            // "Your Hand" label (or "Hand 1 of 3" for splits)
+            Text(playerHandLabel)
+                .font(.headline)
+                .foregroundColor(.mediumGrey)
 
             // Player's cards
             HStack(spacing: -30) {
-                ForEach(playerHand.cards) { card in
+                ForEach(viewModel.currentHand.cards) { card in
                     CardView(card: card, size: .standard)
                 }
             }
 
-            // "Your Hand" label
-            Text("Your Hand")
-                .font(.headline)
-                .foregroundColor(.mediumGrey)
+            // Hand total
+            Text(viewModel.currentHand.displayString)
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundColor(handTotalColor)
         }
     }
 
@@ -212,11 +233,42 @@ struct GameView: View {
     // └─────────────────────────────────────────────────────────────────────┘
 
     private var actionButtonsArea: some View {
-        HStack(spacing: 16) {
-            // Placeholder buttons (Phase 2 will make these functional)
-            actionButton(title: "Hit", color: .success)
-            actionButton(title: "Stand", color: .info)
-            actionButton(title: "Double", color: .warning)
+        VStack(spacing: 16) {
+            // Primary row: Hit, Stand, Double
+            HStack(spacing: 12) {
+                if viewModel.canHit {
+                    actionButton(title: "Hit", color: .success) {
+                        viewModel.hit()
+                    }
+                }
+
+                if viewModel.canStand {
+                    actionButton(title: "Stand", color: .info) {
+                        viewModel.stand()
+                    }
+                }
+
+                if viewModel.canDoubleDown {
+                    actionButton(title: "Double", color: .warning) {
+                        viewModel.doubleDown()
+                    }
+                }
+            }
+
+            // Secondary row: Split, Surrender
+            HStack(spacing: 12) {
+                if viewModel.canSplit {
+                    actionButton(title: "Split", color: .info) {
+                        viewModel.split()
+                    }
+                }
+
+                if viewModel.canSurrender {
+                    actionButton(title: "Surrender", color: .bustHighlight) {
+                        viewModel.surrender()
+                    }
+                }
+            }
         }
         .padding(.vertical, 20)
     }
@@ -242,17 +294,157 @@ struct GameView: View {
     }
 
     // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 💰 BETTING AREA - Bet Selection Interface                           │
+    // │                                                                      │
+    // │ Business Logic: Player selects bet amount before each hand          │
+    // │ Shows: Slider, bet presets, confirm button                          │
+    // │ Special case: Game over shows bankruptcy message and reset button   │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    private var bettingArea: some View {
+        VStack(spacing: 24) {
+            if viewModel.gameState == .gameOver {
+                // Bankruptcy screen
+                VStack(spacing: 16) {
+                    Text("💸 Bankrupt!")
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundColor(.bustHighlight)
+
+                    Text("Your balance ($\(formatCurrency(viewModel.bankroll))) is below the minimum bet ($\(formatCurrency(viewModel.minimumBet)))")
+                        .font(.body)
+                        .foregroundColor(.mediumGrey)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+
+                    Button(action: {
+                        viewModel.resetBankroll(to: 10000)
+                    }) {
+                        Text("Reset Bankroll to $10,000")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: 280)
+                            .padding(.vertical, 16)
+                            .background(Color.success)
+                            .cornerRadius(12)
+                    }
+                }
+            } else {
+                // Normal betting screen
+                VStack(spacing: 24) {
+                    // Bet amount display
+                    Text("$\(formatCurrency(betSliderValue))")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.chipGradient)
+
+                    // Bet slider
+                    VStack(spacing: 8) {
+                        Slider(value: $betSliderValue,
+                               in: viewModel.minimumBet...viewModel.bankroll,
+                               step: 5)
+                            .accentColor(Color.info)
+
+                        HStack {
+                            Text("$\(formatCurrency(viewModel.minimumBet))")
+                                .font(.caption)
+                                .foregroundColor(.mediumGrey)
+                            Spacer()
+                            Text("$\(formatCurrency(viewModel.bankroll))")
+                                .font(.caption)
+                                .foregroundColor(.mediumGrey)
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    // Bet presets
+                    HStack(spacing: 12) {
+                        betPresetButton(title: "Min", amount: viewModel.minimumBet)
+                        betPresetButton(title: "25%", amount: viewModel.bankroll * 0.25)
+                        betPresetButton(title: "50%", amount: viewModel.bankroll * 0.5)
+                        betPresetButton(title: "Max", amount: viewModel.bankroll)
+                    }
+                    .padding(.horizontal)
+
+                    // Confirm bet button
+                    Button(action: {
+                        viewModel.placeBet(betSliderValue)
+                    }) {
+                        Text("Place Bet")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 20)
+                            .background(betSliderValue >= viewModel.minimumBet ? Color.success : Color.darkGrey)
+                            .cornerRadius(12)
+                    }
+                    .disabled(betSliderValue < viewModel.minimumBet)
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🏆 RESULT AREA - Win/Loss Display & Next Hand                       │
+    // │                                                                      │
+    // │ Business Logic: Shows outcome message and allows starting next hand │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    private var resultArea: some View {
+        VStack(spacing: 16) {
+            // Result message
+            Text(viewModel.resultMessage)
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+                .padding()
+
+            // Next hand button
+            Button(action: {
+                // Reset bet slider to last bet
+                betSliderValue = viewModel.lastBet
+                viewModel.nextHand()
+            }) {
+                Text("Next Hand")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: 280)
+                    .padding(.vertical, 16)
+                    .background(Color.info)
+                    .cornerRadius(12)
+            }
+        }
+        .padding()
+    }
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 🎨 HELPER VIEWS                                                      │
     // └─────────────────────────────────────────────────────────────────────┘
 
-    private func actionButton(title: String, color: Color) -> some View {
-        Button(action: {}) {
+    private func betPresetButton(title: String, amount: Double) -> some View {
+        Button(action: {
+            betSliderValue = min(amount, viewModel.bankroll)
+        }) {
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.darkGrey)
+                .cornerRadius(8)
+        }
+    }
+
+    private func actionButton(title: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Text(title)
                 .font(.headline)
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(Color.darkGrey)
+                .background(color)
                 .cornerRadius(12)
         }
     }
@@ -263,14 +455,37 @@ struct GameView: View {
 
     /// Returns appropriate colour for hand total display
     private var handTotalColor: Color {
-        if playerHand.isBlackjack {
+        if viewModel.currentHand.isBlackjack {
             return .blackjackGlow
-        } else if playerHand.isBust {
+        } else if viewModel.currentHand.isBust {
             return .bustHighlight
-        } else if playerHand.isSoft {
+        } else if viewModel.currentHand.isSoft {
             return .info
         } else {
             return .white
+        }
+    }
+
+    /// Dealer display total (shows "?" when hole card is hidden)
+    private var dealerDisplayTotal: String {
+        if viewModel.gameState == .playerTurn || viewModel.gameState == .dealing {
+            // Only show upcard value during player's turn
+            if let upcard = viewModel.dealerUpcard {
+                return "\(upcard.value)"
+            }
+            return "?"
+        } else {
+            // Show full hand total after player's turn
+            return viewModel.dealerHand.displayString
+        }
+    }
+
+    /// Player hand label (shows hand number for splits)
+    private var playerHandLabel: String {
+        if viewModel.playerHands.count > 1 {
+            return "Hand \(viewModel.currentHandIndex + 1) of \(viewModel.playerHands.count)"
+        } else {
+            return "Your Hand"
         }
     }
 
@@ -295,29 +510,27 @@ struct GameView: View {
 // ║ Xcode preview for design iteration                                        ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
-#Preview("Game View - Blackjack") {
+#Preview("Game View - Betting State") {
     GameView()
 }
 
-#Preview("Game View - Regular Hand") {
-    var view = GameView()
-    view.playerHand = Hand.from(["K♠", "9♥"])
-    view.dealerHand = Hand.from(["A♦"])
-    return view
-}
-
 // ╔═══════════════════════════════════════════════════════════════════════════╗
-// ║ 📖 PHASE 2 TODO                                                            ║
+// ║ ✅ PHASE 2 COMPLETE                                                        ║
 // ║                                                                            ║
-// ║ Next steps for this view:                                                 ║
-// ║ • Replace @State with @StateObject GameViewModel                          ║
-// ║ • Implement action button logic (Hit, Stand, Double, Split)               ║
-// ║ • Add betting UI before each hand                                         ║
-// ║ • Implement card dealing animations                                       ║
-// ║ • Add dealer card flip animation for hole card reveal                     ║
-// ║ • Implement swipe-up gesture for statistics panel                         ║
-// ║ • Add win/loss result display with chip animation                         ║
-// ║ • Handle multiple hands (after split)                                     ║
-// ║ • Add dealer avatar display                                               ║
-// ║ • Implement strategy hints (green/yellow pulses on buttons)               ║
+// ║ Implemented in Phase 2:                                                   ║
+// ║ ✅ GameViewModel integration with @StateObject                            ║
+// ║ ✅ Action button logic (Hit, Stand, Double, Split, Surrender)             ║
+// ║ ✅ Betting UI with slider and presets                                     ║
+// ║ ✅ Win/loss result display with next hand flow                            ║
+// ║ ✅ Handle multiple hands (split support)                                  ║
+// ║ ✅ Bankruptcy handling with reset option                                  ║
+// ║ ✅ State-based UI (betting → playing → result)                            ║
+// ║                                                                            ║
+// ║ Phase 3+ Features:                                                         ║
+// ║ • Dealer avatars and personality-based rules                              ║
+// ║ • Card dealing animations                                                 ║
+// ║ • Dealer card flip animation for hole card reveal                         ║
+// ║ • Swipe-up gesture for statistics panel                                   ║
+// ║ • Strategy hints (green/yellow pulses on buttons)                         ║
+// ║ • Sound effects and haptic feedback                                       ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
