@@ -44,6 +44,13 @@ class GameViewModel: ObservableObject {
     // │ GameView observes these to stay in sync with game state             │
     // └─────────────────────────────────────────────────────────────────────┘
 
+    /// Current dealer personality (Phase 3: Dealer Personalities)
+    /// Determines all game rules, theme, and playing experience
+    @Published var currentDealer: Dealer
+
+    /// Current Maverick rule set name (for display when playing Maverick)
+    @Published private(set) var currentMaverickRuleName: String?
+
     /// Current game state - drives UI display and available actions
     @Published private(set) var gameState: GameState = .betting
 
@@ -71,7 +78,10 @@ class GameViewModel: ObservableObject {
     /// Last bet amount (used to remember bet between hands)
     @Published private(set) var lastBet: Double = 10
 
-    /// Minimum bet allowed (based on settings or dealer rules)
+    /// Base minimum bet (before dealer multiplier)
+    private let baseMinimumBet: Double = 10
+
+    /// Minimum bet allowed (based on dealer rules)
     @Published var minimumBet: Double = 10
 
     /// Result message to display to player
@@ -92,20 +102,94 @@ class GameViewModel: ObservableObject {
     /// Bets for each hand (needed for splits where each hand can have different bets)
     private var handBets: [Double] = []
 
+    /// Maverick rule generator (for randomising Maverick's rules each shoe)
+    private var maverickGenerator = MaverickRuleGenerator()
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 📜 CURRENT RULES                                                     │
+    // │                                                                      │
+    // │ Computed property that returns current dealer's rules               │
+    // │ All game logic should reference this, not hardcoded values          │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    var rules: GameRules {
+        return currentDealer.rules
+    }
+
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 🏗️ INITIALISER                                                       │
     // │                                                                      │
+    // │ Phase 3 Update: Now takes dealer instead of individual parameters   │
+    // │                                                                      │
     // │ Parameters:                                                          │
-    // │ • numberOfDecks: Shoe size (1-8, based on dealer - default 6)       │
+    // │ • dealer: Dealer personality (default: Ruby)                        │
     // │ • startingBankroll: Initial player balance (default $10,000 AUD)    │
-    // │ • minimumBet: Lowest bet allowed (default $10 AUD)                  │
     // └─────────────────────────────────────────────────────────────────────┘
 
-    init(numberOfDecks: Int = 6, startingBankroll: Double = 10000, minimumBet: Double = 10) {
-        self.deckManager = DeckManager(numberOfDecks: numberOfDecks, penetrationThreshold: 0.75)
+    init(dealer: Dealer = .ruby(), startingBankroll: Double = 10000) {
+        self.currentDealer = dealer
+        self.deckManager = DeckManager(
+            numberOfDecks: dealer.rules.numberOfDecks,
+            penetrationThreshold: 0.75
+        )
         self.bankroll = startingBankroll
-        self.minimumBet = minimumBet
-        self.lastBet = minimumBet
+
+        // Calculate minimum bet from dealer rules
+        self.minimumBet = self.baseMinimumBet * dealer.rules.minimumBetMultiplier
+        self.lastBet = self.minimumBet
+    }
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🔄 SWITCH DEALER                                                     │
+    // │                                                                      │
+    // │ Business Logic: Change dealers mid-session                          │
+    // │ Called when: Player selects new dealer from dealer selection screen │
+    // │                                                                      │
+    // │ Side Effects:                                                        │
+    // │ • Creates new deck manager with new dealer's deck count             │
+    // │ • Updates minimum bet based on dealer's multiplier                  │
+    // │ • Resets current game state to betting                              │
+    // │ • Clears hands and bets                                             │
+    // │ • For Maverick: Generates initial random rules                      │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    func switchDealer(to newDealer: Dealer) {
+        print("🔄 Switching from \(currentDealer.name) to \(newDealer.name)")
+
+        // Update dealer
+        currentDealer = newDealer
+
+        // Create new deck manager with new dealer's deck count
+        deckManager = DeckManager(
+            numberOfDecks: newDealer.rules.numberOfDecks,
+            penetrationThreshold: 0.75
+        )
+
+        // Update minimum bet
+        minimumBet = baseMinimumBet * newDealer.rules.minimumBetMultiplier
+        lastBet = minimumBet
+
+        // If switching to Maverick, generate initial random rules
+        if newDealer.name == "Maverick" {
+            let (ruleName, newRules) = maverickGenerator.generateRandomRules()
+            currentMaverickRuleName = ruleName
+            // Update dealer's rules (we'll need to make dealer mutable for this)
+            print("🎲 Maverick starting with: \(ruleName)")
+        }
+
+        // Reset game state
+        playerHands = [Hand()]
+        dealerHand = Hand()
+        dealerUpcard = nil
+        dealerHoleCard = nil
+        currentHandIndex = 0
+        currentBet = 0
+        handBets = []
+        resultMessage = ""
+        needsReshuffle = false
+        gameState = .betting
+
+        print("✅ Dealer switch complete")
     }
 
     // ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -235,11 +319,13 @@ class GameViewModel: ObservableObject {
                 bankroll += currentBet // Return bet
                 print("🤝 Push - Both have blackjack")
             } else if playerHasBlackjack {
-                // Player wins 3:2
-                let payout = currentBet * 2.5 // Bet + 1.5x bet = 2.5x total
+                // Phase 3: Player wins - payout per dealer rules
+                let payout = currentBet * (1 + rules.blackjackPayout)
                 bankroll += payout
-                resultMessage = "Blackjack! You win $\(formatCurrency(payout - currentBet))!"
-                print("🎉 Player blackjack! Payout: $\(payout)")
+
+                let payoutRatio = rules.blackjackPayout == 1.5 ? "3:2" : "6:5"
+                resultMessage = "Blackjack (\(payoutRatio))! You win $\(formatCurrency(payout - currentBet))!"
+                print("🎉 Player blackjack (\(payoutRatio))! Payout: $\(formatCurrency(payout))")
             } else {
                 // Dealer wins
                 resultMessage = "Dealer Blackjack - You lose"
@@ -344,16 +430,16 @@ class GameViewModel: ObservableObject {
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 💪 DOUBLE DOWN - Double Bet, Take One Card, Auto-Stand              │
     // │                                                                      │
+    // │ Phase 3 Updates:                                                     │
+    // │ • Shark restricts doubles to 9/10/11 only                           │
+    // │ • Lucky offers free doubles (no additional cost!)                   │
+    // │ • Check double after split rules                                    │
+    // │                                                                      │
     // │ Business Logic: Risky move - double your bet for exactly one card   │
     // │ Called when: Player taps "Double" button (only available on 2 cards)│
     // │                                                                      │
-    // │ Rules:                                                               │
-    // │ • Only available on first two cards (hand.canDouble())              │
-    // │ • Some dealers restrict to totals 9/10/11 (Phase 3)                 │
-    // │ • Must have enough bankroll to double                               │
-    // │                                                                      │
     // │ Side Effects:                                                        │
-    // │ • Deducts additional bet from bankroll                              │
+    // │ • Deducts additional bet from bankroll (unless Lucky's free double) │
     // │ • Deals exactly one card                                            │
     // │ • Automatically stands (no more actions allowed)                    │
     // └─────────────────────────────────────────────────────────────────────┘
@@ -371,19 +457,44 @@ class GameViewModel: ObservableObject {
             return
         }
 
-        let additionalBet = handBets[currentHandIndex]
+        // Phase 3: Check if this hand came from a split
+        let isAfterSplit = playerHands.count > 1
 
-        guard bankroll >= additionalBet else {
-            print("⚠️ Insufficient funds to double - need $\(additionalBet), have $\(bankroll)")
+        // Check double after split rule
+        if isAfterSplit && !rules.doubleAfterSplit {
+            print("⚠️ Cannot double after split (dealer rule)")
             return
         }
 
-        // Deduct additional bet
-        bankroll -= additionalBet
+        // Phase 3: Check restricted double totals (Shark: 9/10/11 only)
+        if let restrictedTotals = rules.doubleOnlyOn {
+            if !restrictedTotals.contains(hand.total) {
+                print("⚠️ Cannot double on \(hand.total) - only allowed on \(restrictedTotals)")
+                return
+            }
+        }
+
+        let additionalBet = handBets[currentHandIndex]
+
+        // Phase 3: Lucky's free doubles - don't require bankroll
+        if !rules.freeDoubles {
+            // Normal double - need bankroll
+            guard bankroll >= additionalBet else {
+                print("⚠️ Insufficient funds to double - need $\(additionalBet), have $\(bankroll)")
+                return
+            }
+
+            // Deduct additional bet
+            bankroll -= additionalBet
+            print("💪 Player doubles down - bet now $\(handBets[currentHandIndex] * 2)")
+        } else {
+            // 🍀 Lucky's free double!
+            print("🍀 Lucky's free double - no additional cost!")
+        }
+
+        // Update bet tracking (same either way for payout calculation)
         handBets[currentHandIndex] *= 2
         currentBet += additionalBet
-
-        print("💪 Player doubles down - bet now $\(handBets[currentHandIndex])")
 
         // Deal exactly one card
         guard let card = deckManager.dealCard() else {
@@ -411,22 +522,21 @@ class GameViewModel: ObservableObject {
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ ✂️ SPLIT - Split Pair Into Two Hands                                │
     // │                                                                      │
+    // │ Phase 3 Updates:                                                     │
+    // │ • Shark limits to 2 hands max (single split)                        │
+    // │ • Split aces rules: one card only vs full play (dealer-specific)    │
+    // │ • Re-split aces rules (most dealers don't allow)                    │
+    // │ • Lucky offers free splits (no additional cost!)                    │
+    // │                                                                      │
     // │ Business Logic: Split matching cards into two separate hands        │
     // │ Called when: Player taps "Split" button on a pair                   │
     // │                                                                      │
-    // │ Rules:                                                               │
-    // │ • Only on pairs (same rank, e.g., 8♠ 8♥ or K♠ Q♦)                  │
-    // │ • Requires bankroll for second bet (equal to first)                 │
-    // │ • Creates two hands, each with one card                             │
-    // │ • Deals one card to each new hand                                   │
-    // │ • Most dealers allow 3 re-splits (4 hands max)                      │
-    // │ • Special rule: Split aces usually get only 1 card each (Phase 3)   │
-    // │                                                                      │
     // │ Side Effects:                                                        │
-    // │ • Deducts second bet from bankroll                                  │
+    // │ • Deducts second bet from bankroll (unless Lucky's free split)      │
     // │ • Creates two hands from one                                        │
     // │ • Deals one card to each hand                                       │
-    // │ • Player continues with first hand                                  │
+    // │ • For split aces with one-card rule: Auto-stands both hands         │
+    // │ • Otherwise: Player continues with first hand                       │
     // └─────────────────────────────────────────────────────────────────────┘
 
     func split() {
@@ -442,77 +552,130 @@ class GameViewModel: ObservableObject {
             return
         }
 
-        guard playerHands.count < 4 else {
-            print("⚠️ Cannot split - already have 4 hands (max)")
+        // Phase 3: Check max split hands rule (Shark = 2, most others = 4)
+        guard playerHands.count < rules.maxSplitHands else {
+            print("⚠️ Cannot split - already have \(rules.maxSplitHands) hands (max for \(currentDealer.name))")
+            return
+        }
+
+        // Phase 3: Check if this is a pair of aces
+        let isSplittingAces = hand.isPairOfAces()
+
+        // Phase 3: Check re-split aces rule
+        if isSplittingAces && playerHands.count > 1 && !rules.resplitAces {
+            print("⚠️ Cannot re-split aces (dealer rule)")
             return
         }
 
         let splitBet = handBets[currentHandIndex]
 
-        guard bankroll >= splitBet else {
-            print("⚠️ Insufficient funds to split - need $\(splitBet), have $\(bankroll)")
-            return
+        // Phase 3: Lucky's free splits - don't require bankroll
+        if !rules.freeSplits {
+            // Normal split - need bankroll
+            guard bankroll >= splitBet else {
+                print("⚠️ Insufficient funds to split - need $\(splitBet), have $\(bankroll)")
+                return
+            }
+
+            // Deduct second bet
+            bankroll -= splitBet
+            print("✂️ Player splits pair - creating 2 hands at $\(splitBet) each")
+        } else {
+            // 🍀 Lucky's free split!
+            print("🍀 Lucky's free split - no additional cost!")
         }
 
-        // Deduct second bet
-        bankroll -= splitBet
         currentBet += splitBet
-
-        print("✂️ Player splits pair - creating 2 hands at $\(splitBet) each")
 
         // Split the hand
         let cards = hand.cards
         var hand1 = Hand(cards: [cards[0]])
         var hand2 = Hand(cards: [cards[1]])
 
-        // Deal one card to each hand
-        if let card1 = deckManager.dealCard() {
-            hand1.addCard(card1)
-            print("   Hand 1: \(hand1.description)")
-        }
+        // Phase 3: Split aces special handling
+        if isSplittingAces && rules.splitAcesOneCardOnly {
+            print("   ✂️ Splitting aces - one card each (standard rule)")
 
-        if let card2 = deckManager.dealCard() {
-            hand2.addCard(card2)
-            print("   Hand 2: \(hand2.description)")
-        }
+            // Deal one card to each hand
+            if let card1 = deckManager.dealCard() {
+                hand1.addCard(card1)
+                print("   Hand 1: \(hand1.description)")
+            }
 
-        // Replace current hand and insert new hand
-        playerHands[currentHandIndex] = hand1
-        playerHands.insert(hand2, at: currentHandIndex + 1)
-        handBets.insert(splitBet, at: currentHandIndex + 1)
+            if let card2 = deckManager.dealCard() {
+                hand2.addCard(card2)
+                print("   Hand 2: \(hand2.description)")
+            }
 
-        // Continue playing first split hand
-        print("▶️ Playing hand 1 of \(playerHands.count)")
+            // Replace current hand and insert new hand
+            playerHands[currentHandIndex] = hand1
+            playerHands.insert(hand2, at: currentHandIndex + 1)
+            handBets.insert(splitBet, at: currentHandIndex + 1)
 
-        // Check for instant 21 on first hand (auto-stand)
-        if hand1.total == 21 {
-            print("✓ First split hand is 21 - auto-standing")
-            stand()
+            // Auto-stand both hands (split aces one card rule)
+            print("   ✋ Split aces complete - both hands stand")
+
+            // Move to dealer turn (no more player actions)
+            gameState = .dealerTurn
+            playDealerHand()
+
+        } else {
+            // Normal split or split aces with full play (Lucky, Zen)
+            print("   ✂️ Splitting pair - normal play")
+
+            // Deal one card to each hand
+            if let card1 = deckManager.dealCard() {
+                hand1.addCard(card1)
+                print("   Hand 1: \(hand1.description)")
+            }
+
+            if let card2 = deckManager.dealCard() {
+                hand2.addCard(card2)
+                print("   Hand 2: \(hand2.description)")
+            }
+
+            // Replace current hand and insert new hand
+            playerHands[currentHandIndex] = hand1
+            playerHands.insert(hand2, at: currentHandIndex + 1)
+            handBets.insert(splitBet, at: currentHandIndex + 1)
+
+            // Continue playing first split hand
+            print("▶️ Playing hand 1 of \(playerHands.count)")
+
+            // Check for instant 21 on first hand (auto-stand)
+            if hand1.total == 21 {
+                print("✓ First split hand is 21 - auto-standing")
+                stand()
+            }
         }
     }
 
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 🏳️ SURRENDER - Forfeit Half Bet, End Hand                           │
     // │                                                                      │
+    // │ Phase 3 Updates:                                                     │
+    // │ • Check if surrender is allowed (dealer-specific)                   │
+    // │ • Early surrender (Zen): Before dealer checks for blackjack         │
+    // │ • Late surrender (Lucky): After dealer checks for blackjack         │
+    // │                                                                      │
     // │ Business Logic: Give up and get half your bet back                  │
     // │ Called when: Player taps "Surrender" button (dealer-specific)       │
-    // │                                                                      │
-    // │ Rules:                                                               │
-    // │ • Only available as first action (before hit/stand)                 │
-    // │ • Not all dealers allow this (Lucky & Zen do, Ruby doesn't)         │
-    // │ • Returns 50% of bet to player                                      │
     // │                                                                      │
     // │ Side Effects:                                                        │
     // │ • Returns half bet to bankroll                                      │
     // │ • Immediately ends hand (no dealer play needed)                     │
     // │ • Transitions to result state                                       │
-    // │                                                                      │
-    // │ Phase 2 Note: Basic implementation here, dealer rules in Phase 3    │
     // └─────────────────────────────────────────────────────────────────────┘
 
     func surrender() {
         guard gameState == .playerTurn else {
             print("⚠️ Cannot surrender in \(gameState) state")
+            return
+        }
+
+        // Phase 3: Check if surrender is allowed for this dealer
+        guard rules.surrenderAllowed else {
+            print("⚠️ \(currentDealer.name) doesn't allow surrender")
             return
         }
 
@@ -524,13 +687,22 @@ class GameViewModel: ObservableObject {
             return
         }
 
+        // Phase 3: Early vs Late surrender
+        // Early surrender (Zen): Can surrender before checking dealer blackjack
+        // Late surrender (Lucky): Can only surrender after checking (already done in dealInitialCards)
+        // This implementation assumes late surrender is default
+        // Early surrender would need to be checked in dealInitialCards before blackjack check
+
+        let surrenderType = rules.earlySurrender ? "early" : "late"
+        print("🏳️ Player surrenders (\(surrenderType) surrender)")
+
         let bet = handBets[currentHandIndex]
         let refund = bet * 0.5
 
         bankroll += refund
         currentBet -= refund
 
-        print("🏳️ Player surrenders - refunding $\(refund) (half of $\(bet))")
+        print("   Refunding $\(formatCurrency(refund)) (half of $\(formatCurrency(bet)))")
 
         resultMessage = "Surrendered - $\(formatCurrency(refund)) returned"
         gameState = .result
@@ -583,9 +755,26 @@ class GameViewModel: ObservableObject {
 
         print("🎰 Dealer plays: \(dealerHand.description)")
 
-        // Dealer hits on 16 or less, stands on 17 or more
-        // TODO Phase 3: Add soft 17 rule variations per dealer
-        while dealerHand.total < 17 {
+        // ┌─────────────────────────────────────────────────────────────────────┐
+        // │ 🤖 DEALER AI - Phase 3: Soft 17 Rule Implementation                 │
+        // │                                                                      │
+        // │ Dealer must follow fixed rules:                                     │
+        // │ • Always hit on 16 or less                                          │
+        // │ • Soft 17 rule (dealer-specific):                                   │
+        // │   - If dealerHitsSoft17 == false: Stand on all 17s (Ruby, Lucky)   │
+        // │   - If dealerHitsSoft17 == true: Hit soft 17, stand hard 17 (Shark)│
+        // │                                                                      │
+        // │ Example: Dealer has A-6 (soft 17)                                   │
+        // │ • Ruby: Stands (player-friendly)                                    │
+        // │ • Shark: Hits (more aggressive, higher house edge)                  │
+        // └─────────────────────────────────────────────────────────────────────┘
+
+        while dealerHand.total < 17 ||
+              (dealerHand.total == 17 && dealerHand.isSoft && rules.dealerHitsSoft17) {
+            // Dealer hits if:
+            // 1. Total < 17, OR
+            // 2. Soft 17 AND rules say to hit soft 17
+
             guard let card = deckManager.dealCard() else {
                 print("❌ No cards remaining for dealer")
                 break
@@ -601,7 +790,8 @@ class GameViewModel: ObservableObject {
         }
 
         if !dealerHand.isBust {
-            print("   ✋ Dealer stands on \(dealerHand.displayString)")
+            let handType = dealerHand.isSoft ? "soft" : "hard"
+            print("   ✋ Dealer stands on \(handType) \(dealerHand.total)")
         }
 
         // Evaluate all results
@@ -683,11 +873,16 @@ class GameViewModel: ObservableObject {
                 print("   Hand \(index + 1): Dealer bust - win $\(bet)")
 
             } else if hand.isBlackjack && !dealerHand.isBlackjack {
-                // Player blackjack beats dealer 21 - pays 3:2
-                let payout = bet * 2.5 // Return bet + 1.5x bet
+                // Phase 3: Player blackjack beats dealer 21 - pays per dealer rules
+                // Ruby/Lucky/Zen/Blitz: 3:2 (1.5x) → bet * 2.5 total
+                // Shark: 6:5 (1.2x) → bet * 2.2 total
+                let payout = bet * (1 + rules.blackjackPayout) // Bet + winnings
                 totalPayout += payout
-                outcomes.append("Blackjack\(handNum): +$\(formatCurrency(payout - bet))")
-                print("   Hand \(index + 1): Blackjack - win $\(payout - bet)")
+
+                // Display payout ratio
+                let payoutRatio = rules.blackjackPayout == 1.5 ? "3:2" : "6:5"
+                outcomes.append("Blackjack\(handNum): +$\(formatCurrency(payout - bet)) (\(payoutRatio))")
+                print("   Hand \(index + 1): Blackjack (\(payoutRatio)) - win $\(formatCurrency(payout - bet))")
 
             } else if hand.total > dealerTotal {
                 // Player total higher - wins 1:1
@@ -835,22 +1030,66 @@ class GameViewModel: ObservableObject {
         return gameState == .playerTurn && !currentHand.isBust
     }
 
-    /// Can player double down?
+    /// Phase 3: Can player double down?
+    /// Now checks dealer-specific rules
     var canDoubleDown: Bool {
-        return gameState == .playerTurn && currentHand.canDouble() && bankroll >= handBets[currentHandIndex]
+        guard gameState == .playerTurn && currentHand.canDouble() else {
+            return false
+        }
+
+        // Check if this hand came from a split
+        let isAfterSplit = playerHands.count > 1
+        if isAfterSplit && !rules.doubleAfterSplit {
+            return false // Dealer doesn't allow double after split
+        }
+
+        // Check restricted double totals (Shark: 9/10/11 only)
+        if let restrictedTotals = rules.doubleOnlyOn {
+            if !restrictedTotals.contains(currentHand.total) {
+                return false // Hand total not in allowed list
+            }
+        }
+
+        // Check bankroll (unless Lucky's free double)
+        if !rules.freeDoubles {
+            return bankroll >= handBets[currentHandIndex]
+        }
+
+        return true
     }
 
-    /// Can player split?
+    /// Phase 3: Can player split?
+    /// Now checks dealer-specific max split hands and bankroll
     var canSplit: Bool {
-        return gameState == .playerTurn &&
-               currentHand.canSplit() &&
-               playerHands.count < 4 &&
-               bankroll >= handBets[currentHandIndex]
+        guard gameState == .playerTurn && currentHand.canSplit() else {
+            return false
+        }
+
+        // Check max split hands (Shark = 2, others = 4)
+        if playerHands.count >= rules.maxSplitHands {
+            return false
+        }
+
+        // Check if splitting aces and re-split aces not allowed
+        if currentHand.isPairOfAces() && playerHands.count > 1 && !rules.resplitAces {
+            return false
+        }
+
+        // Check bankroll (unless Lucky's free split)
+        if !rules.freeSplits {
+            return bankroll >= handBets[currentHandIndex]
+        }
+
+        return true
     }
 
-    /// Can player surrender?
+    /// Phase 3: Can player surrender?
+    /// Now checks if dealer allows surrender
     var canSurrender: Bool {
-        return gameState == .playerTurn && currentHand.count == 2 && playerHands.count == 1
+        return gameState == .playerTurn &&
+               currentHand.count == 2 &&
+               playerHands.count == 1 &&
+               rules.surrenderAllowed
     }
 
     // ╔═══════════════════════════════════════════════════════════════════════════╗
