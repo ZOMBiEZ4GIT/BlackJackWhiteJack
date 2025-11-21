@@ -105,6 +105,12 @@ class GameViewModel: ObservableObject {
     /// Maverick rule generator (for randomising Maverick's rules each shoe)
     private var maverickGenerator = MaverickRuleGenerator()
 
+    /// Statistics manager for tracking gameplay (Phase 4)
+    private var statsManager = StatisticsManager.shared
+
+    /// Actions taken during current hand (for statistics tracking - Phase 4)
+    private var currentHandActions: [[PlayerAction]] = [[]]
+
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 📜 CURRENT RULES                                                     │
     // │                                                                      │
@@ -155,6 +161,9 @@ class GameViewModel: ObservableObject {
 
     func switchDealer(to newDealer: Dealer) {
         print("🔄 Switching from \(currentDealer.name) to \(newDealer.name)")
+
+        // End current statistics session (Phase 4)
+        endStatisticsSession()
 
         // Update dealer
         currentDealer = newDealer
@@ -239,6 +248,18 @@ class GameViewModel: ObservableObject {
         handBets = [amount]
 
         print("💰 Bet placed: $\(amount) AUD (Bankroll: $\(bankroll))")
+
+        // Start statistics session if this is the first bet
+        if !statsManager.hasActiveSession {
+            statsManager.startSession(
+                dealerName: currentDealer.name,
+                dealerIcon: currentDealer.icon,
+                startingBankroll: bankroll + amount // Add back bet we just deducted
+            )
+        }
+
+        // Reset hand actions tracking
+        currentHandActions = [[]]
 
         // Transition to dealing
         gameState = .dealing
@@ -372,6 +393,9 @@ class GameViewModel: ObservableObject {
         playerHands[currentHandIndex].addCard(card)
         let hand = playerHands[currentHandIndex]
 
+        // Track action for statistics
+        currentHandActions[currentHandIndex].append(.hit)
+
         print("🎴 Player hits: \(card.displayString) → \(hand.description)")
 
         // Check for bust
@@ -413,6 +437,10 @@ class GameViewModel: ObservableObject {
         }
 
         let hand = playerHands[currentHandIndex]
+
+        // Track action for statistics
+        currentHandActions[currentHandIndex].append(.stand)
+
         print("✋ Player stands on \(hand.displayString)")
 
         // Check if there are more split hands
@@ -495,6 +523,11 @@ class GameViewModel: ObservableObject {
         // Update bet tracking (same either way for payout calculation)
         handBets[currentHandIndex] *= 2
         currentBet += additionalBet
+
+        // Track action for statistics (Phase 4)
+        currentHandActions[currentHandIndex].append(.doubleDown)
+
+        print("💪 Player doubles down - bet now $\(handBets[currentHandIndex])")
 
         // Deal exactly one card
         guard let card = deckManager.dealCard() else {
@@ -587,6 +620,11 @@ class GameViewModel: ObservableObject {
 
         currentBet += splitBet
 
+        // Track action for statistics (Phase 4)
+        currentHandActions[currentHandIndex].append(.split)
+
+        print("✂️ Player splits pair - creating 2 hands at $\(splitBet) each")
+
         // Split the hand
         let cards = hand.cards
         var hand1 = Hand(cards: [cards[0]])
@@ -611,6 +649,9 @@ class GameViewModel: ObservableObject {
             playerHands[currentHandIndex] = hand1
             playerHands.insert(hand2, at: currentHandIndex + 1)
             handBets.insert(splitBet, at: currentHandIndex + 1)
+
+            // Add actions array for second split hand (Phase 4)
+            currentHandActions.insert([], at: currentHandIndex + 1)
 
             // Auto-stand both hands (split aces one card rule)
             print("   ✋ Split aces complete - both hands stand")
@@ -702,9 +743,16 @@ class GameViewModel: ObservableObject {
         bankroll += refund
         currentBet -= refund
 
+        // Track action for statistics (Phase 4)
+        currentHandActions[currentHandIndex].append(.surrender)
+
         print("   Refunding $\(formatCurrency(refund)) (half of $\(formatCurrency(bet)))")
 
         resultMessage = "Surrendered - $\(formatCurrency(refund)) returned"
+
+        // Record surrender in statistics (Phase 4)
+        recordSurrenderHand()
+
         gameState = .result
     }
 
@@ -921,6 +969,9 @@ class GameViewModel: ObservableObject {
         print("🏆 Results: \(resultMessage.replacingOccurrences(of: "\n", with: " | "))")
         print("💰 Bankroll: $\(bankroll)")
 
+        // Record hands in statistics
+        recordHandResults()
+
         // Check for bankruptcy
         if bankroll < minimumBet {
             print("💸 Bankrupt! Balance ($\(bankroll)) < minimum bet ($\(minimumBet))")
@@ -1090,6 +1141,118 @@ class GameViewModel: ObservableObject {
                currentHand.count == 2 &&
                playerHands.count == 1 &&
                rules.surrenderAllowed
+    }
+
+    // ╔═══════════════════════════════════════════════════════════════════════════╗
+    // ║ 📊 STATISTICS TRACKING                                                     ║
+    // ╚═══════════════════════════════════════════════════════════════════════════╝
+
+    // ┌─────────────────────────────────────────────────────────────────┐
+    // │ 📊 RECORD HAND RESULTS                                           │
+    // │                                                                  │
+    // │ Business Logic: Convert game results to HandResult objects      │
+    // │ and record them in StatisticsManager                            │
+    // │                                                                  │
+    // │ Called by: evaluateResults() after all hands are resolved       │
+    // └─────────────────────────────────────────────────────────────────┘
+
+    private func recordHandResults() {
+        let dealerTotal = dealerHand.total
+        let dealerBust = dealerHand.isBust
+        let dealerCardsString = dealerHand.cards.map { $0.displayString }.joined(separator: ", ")
+
+        // Record each player hand
+        for (index, hand) in playerHands.enumerated() {
+            let bet = handBets[index]
+            let playerCardsString = hand.cards.map { $0.displayString }.joined(separator: ", ")
+            let actions = currentHandActions.count > index ? currentHandActions[index] : []
+            let wasSplit = playerHands.count > 1
+
+            // Determine outcome
+            let outcome: HandOutcome
+            let payout: Double
+
+            if hand.isBust {
+                outcome = .bust
+                payout = 0
+            } else if dealerBust {
+                outcome = .dealerBust
+                payout = bet * 2
+            } else if hand.isBlackjack && !dealerHand.isBlackjack {
+                outcome = .blackjack
+                payout = bet * 2.5
+            } else if hand.total > dealerTotal {
+                outcome = .win
+                payout = bet * 2
+            } else if hand.total == dealerTotal {
+                outcome = .push
+                payout = bet
+            } else {
+                outcome = .loss
+                payout = 0
+            }
+
+            // Create HandResult
+            let handResult = HandResult(
+                playerCards: playerCardsString,
+                playerTotal: hand.total,
+                dealerCards: dealerCardsString,
+                dealerTotal: dealerTotal,
+                betAmount: bet,
+                payout: payout,
+                outcome: outcome,
+                actions: actions,
+                wasSplit: wasSplit
+            )
+
+            // Record in statistics manager
+            statsManager.recordHand(handResult, newBankroll: bankroll)
+        }
+    }
+
+    // ┌─────────────────────────────────────────────────────────────────┐
+    // │ 🏳️ RECORD SURRENDER HAND                                         │
+    // │                                                                  │
+    // │ Business Logic: Record surrender as special case                │
+    // │ Called by: surrender() immediately when player surrenders       │
+    // └─────────────────────────────────────────────────────────────────┘
+
+    private func recordSurrenderHand() {
+        let hand = playerHands[currentHandIndex]
+        let bet = handBets[currentHandIndex]
+        let playerCardsString = hand.cards.map { $0.displayString }.joined(separator: ", ")
+        let dealerCardsString = dealerUpcard?.displayString ?? "?"
+        let actions = currentHandActions[currentHandIndex]
+
+        let handResult = HandResult(
+            playerCards: playerCardsString,
+            playerTotal: hand.total,
+            dealerCards: dealerCardsString + " + [hidden]",
+            dealerTotal: 0, // Not revealed
+            betAmount: bet,
+            payout: bet * 0.5, // Half bet back
+            outcome: .surrender,
+            actions: actions,
+            wasSplit: false
+        )
+
+        statsManager.recordHand(handResult, newBankroll: bankroll)
+    }
+
+    // ┌─────────────────────────────────────────────────────────────────┐
+    // │ 🔚 END STATISTICS SESSION                                        │
+    // │                                                                  │
+    // │ Business Logic: End current stats session (e.g., when changing  │
+    // │ dealers or quitting)                                            │
+    // │                                                                  │
+    // │ Public method for GameView or settings to call                  │
+    // └─────────────────────────────────────────────────────────────────┘
+
+    func endStatisticsSession() {
+        if statsManager.hasActiveSession {
+            statsManager.endSession(finalBankroll: bankroll)
+            print("📊 Statistics session ended")
+        }
     }
 
     // ╔═══════════════════════════════════════════════════════════════════════════╗
