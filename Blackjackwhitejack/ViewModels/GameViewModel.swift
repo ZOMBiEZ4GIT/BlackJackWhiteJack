@@ -108,6 +108,9 @@ class GameViewModel: ObservableObject {
     /// Statistics manager for tracking gameplay (Phase 4)
     private var statsManager = StatisticsManager.shared
 
+    /// Tutorial manager for interactive tutorial (Phase 6)
+    private var tutorialManager = TutorialManager.shared
+
     /// Actions taken during current hand (for statistics tracking - Phase 4)
     private var currentHandActions: [[PlayerAction]] = [[]]
 
@@ -261,6 +264,9 @@ class GameViewModel: ObservableObject {
         // Reset hand actions tracking
         currentHandActions = [[]]
 
+        // Notify tutorial manager (Phase 6)
+        tutorialManager.notifyActionCompleted(.placeBet)
+
         // Transition to dealing
         gameState = .dealing
 
@@ -396,6 +402,9 @@ class GameViewModel: ObservableObject {
         // Track action for statistics
         currentHandActions[currentHandIndex].append(.hit)
 
+        // Notify tutorial manager (Phase 6)
+        tutorialManager.notifyActionCompleted(.makePlayerAction)
+
         print("🎴 Player hits: \(card.displayString) → \(hand.description)")
 
         // Check for bust
@@ -440,6 +449,9 @@ class GameViewModel: ObservableObject {
 
         // Track action for statistics
         currentHandActions[currentHandIndex].append(.stand)
+
+        // Notify tutorial manager (Phase 6)
+        tutorialManager.notifyActionCompleted(.makePlayerAction)
 
         print("✋ Player stands on \(hand.displayString)")
 

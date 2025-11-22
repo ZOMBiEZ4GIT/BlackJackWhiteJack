@@ -46,6 +46,12 @@ struct GameView: View {
     // UI state for betting slider
     @State private var betSliderValue: Double = 10
 
+    // Phase 6: Tutorial and Help system
+    @ObservedObject private var tutorialManager = TutorialManager.shared
+    @State private var showWelcome = TutorialManager.shared.shouldShowWelcome
+    @State private var showHelp = false
+    @State private var showSettings = false
+
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 🎨 BODY - Main Layout                                                │
     // └─────────────────────────────────────────────────────────────────────┘
@@ -98,6 +104,27 @@ struct GameView: View {
                 swipeIndicator
             }
             .padding()
+
+            // Phase 6: Tutorial overlay
+            if tutorialManager.isTutorialActive {
+                TutorialOverlayView()
+            }
+
+            // Phase 6: Contextual hints
+            if let hint = tutorialManager.currentHint {
+                ContextualHintView(hint: hint) {
+                    tutorialManager.dismissHint()
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showWelcome) {
+            TutorialWelcomeView(isPresented: $showWelcome)
+        }
+        .sheet(isPresented: $showHelp) {
+            HelpView()
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
     }
 
@@ -115,19 +142,25 @@ struct GameView: View {
 
             Spacer()
 
-            // Dealer info button (Phase 2)
-            Button(action: {}) {
-                Image(systemName: "info.circle")
+            // Help button (Phase 6)
+            Button(action: {
+                showHelp = true
+            }) {
+                Image(systemName: "questionmark.circle")
                     .font(.title2)
                     .foregroundColor(.info)
             }
+            .tutorialSpotlight(.helpButton)
 
-            // Settings button
-            Button(action: {}) {
+            // Settings button (Phase 6)
+            Button(action: {
+                showSettings = true
+            }) {
                 Image(systemName: "gearshape")
                     .font(.title2)
                     .foregroundColor(.mediumGrey)
             }
+            .tutorialSpotlight(.settingsButton)
         }
         .padding(.top, 8)
     }
