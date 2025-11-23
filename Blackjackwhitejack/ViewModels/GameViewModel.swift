@@ -148,6 +148,16 @@ class GameViewModel: ObservableObject {
     private let progressionManager = ProgressionManager.shared
 
     // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🎯 PHASE 9: CHALLENGE MANAGER                                        │
+    // │                                                                      │
+    // │ Purpose: Track daily/weekly challenges and events                   │
+    // │ Integration: Called after each hand to update challenge progress    │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    /// Challenge manager for tracking challenges (Phase 9)
+    private let challengeManager = ChallengeManager.shared
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 📜 CURRENT RULES                                                     │
     // │                                                                      │
     // │ Computed property that returns current dealer's rules               │
@@ -1391,6 +1401,16 @@ class GameViewModel: ObservableObject {
             if currentStreak > 0 {
                 progressionManager.updateLongestStreak(currentStreak)
             }
+
+            // Phase 9: Update challenge progress for this hand
+            updateChallengeProgress(
+                handResult: outcome,
+                wasBlackjack: outcome == .blackjack,
+                wasSplit: wasSplit,
+                wasDoubleDown: actions.contains(.doubleDown),
+                betAmount: bet,
+                currentStreak: currentStreak
+            )
         }
     }
 
@@ -1480,6 +1500,70 @@ class GameViewModel: ObservableObject {
             // Phase 8: Record session in progression
             progressionManager.recordSession(duration: duration)
         }
+    }
+
+    // ╔═══════════════════════════════════════════════════════════════════════════╗
+    // ║ 🎯 CHALLENGE PROGRESS TRACKING (PHASE 9)                                   ║
+    // ╚═══════════════════════════════════════════════════════════════════════════╝
+
+    // ┌─────────────────────────────────────────────────────────────────┐
+    // │ 🎯 UPDATE CHALLENGE PROGRESS                                     │
+    // │                                                                  │
+    // │ Business Logic: Update relevant challenges after a hand         │
+    // │ Called by: recordHandResults() after each hand                  │
+    // └─────────────────────────────────────────────────────────────────┘
+
+    private func updateChallengeProgress(
+        handResult: HandOutcome,
+        wasBlackjack: Bool,
+        wasSplit: Bool,
+        wasDoubleDown: Bool,
+        betAmount: Double,
+        currentStreak: Int
+    ) {
+        // Create challenge context
+        let context = ChallengeContext(
+            dealerName: currentDealer.name,
+            betAmount: Int(betAmount),
+            currentStreak: currentStreak,
+            didBust: handResult == .bust,
+            netProfit: 0 // Would need session profit calculation
+        )
+
+        // Update based on hand result
+        if handResult.isWin {
+            challengeManager.updateChallengeProgress(action: .win, context: context)
+        }
+
+        if wasBlackjack {
+            challengeManager.updateChallengeProgress(action: .blackjack, context: context)
+        }
+
+        if wasDoubleDown && handResult.isWin {
+            challengeManager.updateChallengeProgress(action: .doubleDown, context: context)
+        }
+
+        if wasSplit && handResult.isWin {
+            challengeManager.updateChallengeProgress(action: .split, context: context)
+        }
+
+        if betAmount >= 1000 {
+            challengeManager.updateChallengeProgress(action: .highBet, context: context)
+        }
+
+        if !playerHands[currentHandIndex].isBust {
+            challengeManager.updateChallengeProgress(action: .noBust, context: context)
+        }
+
+        if currentStreak > 0 {
+            challengeManager.updateChallengeProgress(action: .winStreak, context: context)
+        }
+
+        // Always update play hands count
+        challengeManager.updateChallengeProgress(action: .playHands, context: context)
+
+        // Dealer-specific challenges
+        challengeManager.updateChallengeProgress(action: .dealerSpecific, context: context)
     }
 
     // ╔═══════════════════════════════════════════════════════════════════════════╗
