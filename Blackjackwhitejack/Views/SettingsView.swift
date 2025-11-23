@@ -58,6 +58,12 @@ struct SettingsView: View {
     @StateObject private var progressionManager = ProgressionManager.shared
 
     // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ 🎯 PHASE 9: CHALLENGE MANAGER                                        │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    @StateObject private var challengeManager = ChallengeManager.shared
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
     // │ 🎨 STATE                                                              │
     // └──────────────────────────────────────────────────────────────────────┘
 
@@ -88,6 +94,9 @@ struct SettingsView: View {
 
                 // Phase 8: Achievements & Progression section
                 achievementsSection
+
+                // Phase 9: Daily Challenges & Events section
+                challengesSection
 
                 // Phase 7: Visual Settings section
                 visualSettingsSection
@@ -259,6 +268,54 @@ struct SettingsView: View {
             } else {
                 Text("⭐ You've reached max level! Keep playing to unlock all achievements.")
             }
+        }
+    }
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ 🎯 PHASE 9: DAILY CHALLENGES & EVENTS SECTION                       │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    private var challengesSection: some View {
+        Section {
+            // Challenges navigation
+            NavigationLink(destination: ChallengesView()) {
+                HStack {
+                    Image(systemName: "target")
+                        .foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Daily Challenges")
+                            .foregroundColor(.white)
+                        let activeCount = challengeManager.getAllActiveChallenges().filter { !$0.isCompleted }.count
+                        Text("\(activeCount) active challenge\(activeCount == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundColor(.mediumGrey)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.mediumGrey)
+                }
+            }
+
+            // Daily login streak display
+            HStack {
+                Image(systemName: "flame.fill")
+                    .foregroundColor(.red)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Daily Login Streak")
+                        .foregroundColor(.white)
+                    Text("\(challengeManager.dailyLoginStreak) day\(challengeManager.dailyLoginStreak == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundColor(.mediumGrey)
+                }
+                Spacer()
+                Text("🔥")
+                    .font(.title2)
+            }
+        } header: {
+            Text("Daily Challenges & Events")
+        } footer: {
+            Text("Complete daily and weekly challenges to earn XP, chips, and exclusive cosmetics. Maintain your login streak for bonus rewards!")
         }
     }
 
