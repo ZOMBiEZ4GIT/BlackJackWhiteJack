@@ -386,6 +386,96 @@ class ProgressionManager: ObservableObject {
         }
         return "\(currentLevelProgressPercentage)%"
     }
+
+    // ╔═══════════════════════════════════════════════════════════════════╗
+    // ║ 👤 PHASE 10: SOCIAL & PROFILE METHODS                              ║
+    // ╚═══════════════════════════════════════════════════════════════════╝
+
+    /// Update player display name
+    func updateDisplayName(_ name: String) {
+        profile.updateDisplayName(name)
+        saveProfile()
+    }
+
+    /// Update player icon emoji
+    func updateIconEmoji(_ emoji: String) {
+        profile.updateIconEmoji(emoji)
+        saveProfile()
+    }
+
+    /// Toggle share achievements privacy setting
+    func toggleShareAchievements() {
+        profile.toggleShareAchievements()
+        saveProfile()
+    }
+
+    /// Toggle share stats privacy setting
+    func toggleShareStats() {
+        profile.toggleShareStats()
+        saveProfile()
+    }
+
+    /// Toggle anonymous mode
+    func toggleAnonymousMode() {
+        profile.toggleAnonymousMode()
+        saveProfile()
+    }
+
+    /// Update personal best for a category
+    func updatePersonalBest(category: LeaderboardCategory, score: Double) {
+        let isNewBest = profile.updatePersonalBest(category: category.rawValue, score: score)
+        saveProfile()
+
+        // Update leaderboard manager
+        if isNewBest {
+            LeaderboardManager.shared.updatePersonalBest(category: category, score: score)
+
+            // Notify social notification manager
+            if let rank = LeaderboardManager.shared.getPlayerRank(category: category) {
+                SocialNotificationManager.shared.notifyPersonalBest(
+                    category: category,
+                    score: score,
+                    rank: rank
+                )
+            }
+        }
+    }
+
+    /// Update login streak (call on app launch)
+    func updateLoginStreak() {
+        profile.updateLoginStreak()
+        saveProfile()
+
+        // Check for streak milestones
+        let streak = profile.currentLoginStreak
+        if streak == 7 || streak == 30 || streak == 60 || streak == 90 || streak == 180 || streak == 365 {
+            SocialNotificationManager.shared.notifyStreakMilestone(days: streak)
+        }
+    }
+
+    /// Record daily challenge completion
+    func recordDailyChallengeCompletion() {
+        profile.recordDailyChallengeCompletion()
+        saveProfile()
+
+        // Update personal best for daily challenges
+        updatePersonalBest(category: .dailyChallengeMaster, score: Double(profile.dailyChallengesCompleted))
+    }
+
+    /// Calculate total XP for a given level (used by leaderboard AI)
+    func calculateTotalXPForLevel(_ level: Int) -> Int {
+        return totalXpForLevel(level)
+    }
+
+    /// Progress to next level (0.0-1.0)
+    var progressToNextLevel: Double {
+        return currentLevelProgress
+    }
+
+    /// XP required for next level
+    var xpRequiredForNextLevel: Int {
+        return xpRequiredForLevel(profile.level + 1)
+    }
 }
 
 // ╔═══════════════════════════════════════════════════════════════════════════╗
