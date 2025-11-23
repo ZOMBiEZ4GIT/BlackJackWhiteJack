@@ -105,6 +105,43 @@ struct PlayerProfile: Codable {
     var totalPlayTime: TimeInterval
 
     // ┌─────────────────────────────────────────────────────────────────┐
+    // │ 👤 SOCIAL & PROFILE (Phase 10)                                   │
+    // └─────────────────────────────────────────────────────────────────┘
+
+    /// Player's chosen display name for leaderboards
+    var displayName: String
+
+    /// Player's chosen emoji avatar
+    var iconEmoji: String
+
+    /// Privacy: Allow sharing achievements
+    var shareAchievements: Bool
+
+    /// Privacy: Allow sharing statistics
+    var shareStats: Bool
+
+    /// Show as "Anonymous Player" in leaderboards
+    var isAnonymous: Bool
+
+    /// Daily challenges completed (for leaderboards)
+    var dailyChallengesCompleted: Int
+
+    /// Current login streak (for leaderboards)
+    var currentLoginStreak: Int
+
+    /// Longest login streak ever
+    var longestLoginStreak: Int
+
+    /// Last login date (for streak tracking)
+    var lastLoginDate: Date?
+
+    /// Personal best records (category -> best score)
+    var personalBests: [String: Double]
+
+    /// Biggest single-session profit (for leaderboards)
+    var biggestSessionProfit: Double
+
+    // ┌─────────────────────────────────────────────────────────────────┐
     // │ 🎯 PREFERENCES                                                   │
     // └─────────────────────────────────────────────────────────────────┘
 
@@ -135,6 +172,17 @@ struct PlayerProfile: Codable {
         longestWinStreak: Int = 0,
         totalSessions: Int = 0,
         totalPlayTime: TimeInterval = 0,
+        displayName: String = "Player",
+        iconEmoji: String = "🎴",
+        shareAchievements: Bool = true,
+        shareStats: Bool = true,
+        isAnonymous: Bool = false,
+        dailyChallengesCompleted: Int = 0,
+        currentLoginStreak: Int = 0,
+        longestLoginStreak: Int = 0,
+        lastLoginDate: Date? = nil,
+        personalBests: [String: Double] = [:],
+        biggestSessionProfit: Double = 0,
         favouriteDealer: String? = nil,
         achievementNotificationsEnabled: Bool = true
     ) {
@@ -154,6 +202,17 @@ struct PlayerProfile: Codable {
         self.longestWinStreak = longestWinStreak
         self.totalSessions = totalSessions
         self.totalPlayTime = totalPlayTime
+        self.displayName = displayName
+        self.iconEmoji = iconEmoji
+        self.shareAchievements = shareAchievements
+        self.shareStats = shareStats
+        self.isAnonymous = isAnonymous
+        self.dailyChallengesCompleted = dailyChallengesCompleted
+        self.currentLoginStreak = currentLoginStreak
+        self.longestLoginStreak = longestLoginStreak
+        self.lastLoginDate = lastLoginDate
+        self.personalBests = personalBests
+        self.biggestSessionProfit = biggestSessionProfit
         self.favouriteDealer = favouriteDealer
         self.achievementNotificationsEnabled = achievementNotificationsEnabled
     }
@@ -395,6 +454,103 @@ extension PlayerProfile {
     mutating func toggleAchievementNotifications() {
         achievementNotificationsEnabled.toggle()
         lastUpdatedDate = Date()
+    }
+
+    // ┌─────────────────────────────────────────────────────────────────┐
+    // │ 👤 SOCIAL PROFILE METHODS (Phase 10)                             │
+    // └─────────────────────────────────────────────────────────────────┘
+
+    /// Update display name
+    mutating func updateDisplayName(_ name: String) {
+        // Trim and limit to 20 characters
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        displayName = String(trimmed.prefix(20))
+        lastUpdatedDate = Date()
+    }
+
+    /// Update icon emoji
+    mutating func updateIconEmoji(_ emoji: String) {
+        iconEmoji = emoji
+        lastUpdatedDate = Date()
+    }
+
+    /// Update personal best for a category
+    /// Returns true if this is a new personal best
+    mutating func updatePersonalBest(category: String, score: Double) -> Bool {
+        let previousBest = personalBests[category] ?? 0
+        if score > previousBest {
+            personalBests[category] = score
+            lastUpdatedDate = Date()
+            return true
+        }
+        return false
+    }
+
+    /// Update biggest session profit if current is higher
+    mutating func updateBiggestSessionProfit(_ profit: Double) {
+        if profit > biggestSessionProfit {
+            biggestSessionProfit = profit
+            lastUpdatedDate = Date()
+        }
+    }
+
+    /// Record daily challenge completion
+    mutating func recordDailyChallengeCompletion() {
+        dailyChallengesCompleted += 1
+        lastUpdatedDate = Date()
+    }
+
+    /// Update login streak
+    mutating func updateLoginStreak() {
+        let today = Calendar.current.startOfDay(for: Date())
+
+        if let lastLogin = lastLoginDate {
+            let lastLoginDay = Calendar.current.startOfDay(for: lastLogin)
+            let daysBetween = Calendar.current.dateComponents([.day], from: lastLoginDay, to: today).day ?? 0
+
+            if daysBetween == 1 {
+                // Consecutive day - increment streak
+                currentLoginStreak += 1
+                if currentLoginStreak > longestLoginStreak {
+                    longestLoginStreak = currentLoginStreak
+                }
+            } else if daysBetween > 1 {
+                // Streak broken - reset
+                currentLoginStreak = 1
+            }
+            // daysBetween == 0 means same day, don't change streak
+        } else {
+            // First login
+            currentLoginStreak = 1
+            longestLoginStreak = 1
+        }
+
+        lastLoginDate = Date()
+        lastUpdatedDate = Date()
+    }
+
+    /// Toggle privacy settings
+    mutating func toggleShareAchievements() {
+        shareAchievements.toggle()
+        lastUpdatedDate = Date()
+    }
+
+    mutating func toggleShareStats() {
+        shareStats.toggle()
+        lastUpdatedDate = Date()
+    }
+
+    mutating func toggleAnonymousMode() {
+        isAnonymous.toggle()
+        lastUpdatedDate = Date()
+    }
+
+    /// Get display name for leaderboards (respects privacy settings)
+    var leaderboardDisplayName: String {
+        if isAnonymous {
+            return "Anonymous Player"
+        }
+        return displayName.isEmpty ? "Player" : displayName
     }
 
     // ┌─────────────────────────────────────────────────────────────────┐
