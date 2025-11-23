@@ -135,6 +135,19 @@ class GameViewModel: ObservableObject {
     private let visualSettings = VisualSettingsManager.shared
 
     // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🏆 PHASE 8: ACHIEVEMENT & PROGRESSION MANAGERS                       │
+    // │                                                                      │
+    // │ Purpose: Track achievements and player progression                  │
+    // │ Integration: Called after hand results and session completion       │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    /// Achievement manager for tracking achievements (Phase 8)
+    private let achievementManager = AchievementManager.shared
+
+    /// Progression manager for XP and levels (Phase 8)
+    private let progressionManager = ProgressionManager.shared
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 📜 CURRENT RULES                                                     │
     // │                                                                      │
     // │ Computed property that returns current dealer's rules               │
@@ -1349,6 +1362,35 @@ class GameViewModel: ObservableObject {
 
             // Record in statistics manager
             statsManager.recordHand(handResult, newBankroll: bankroll)
+
+            // Phase 8: Check achievements for this hand
+            let currentSession = statsManager.currentSession
+            let currentStreak = currentSession?.currentStreak ?? 0
+
+            achievementManager.checkAchievementsAfterHand(
+                handResult: outcome,
+                wasBlackjack: outcome == .blackjack,
+                wasSplit: wasSplit,
+                wasDoubleDown: actions.contains(.doubleDown),
+                wasSurrender: false,
+                betAmount: bet,
+                dealerName: currentDealer.name,
+                currentStreak: currentStreak,
+                currentBankroll: bankroll,
+                cards: hand.cards.map { $0.displayString }
+            )
+
+            // Phase 8: Record hand in progression system
+            progressionManager.recordHand(
+                won: outcome.isWin,
+                wasBlackjack: outcome == .blackjack,
+                netProfit: payout - bet
+            )
+
+            // Phase 8: Update longest streak
+            if currentStreak > 0 {
+                progressionManager.updateLongestStreak(currentStreak)
+            }
         }
     }
 
@@ -1379,6 +1421,30 @@ class GameViewModel: ObservableObject {
         )
 
         statsManager.recordHand(handResult, newBankroll: bankroll)
+
+        // Phase 8: Check achievements for surrender
+        let currentSession = statsManager.currentSession
+        let currentStreak = currentSession?.currentStreak ?? 0
+
+        achievementManager.checkAchievementsAfterHand(
+            handResult: .surrender,
+            wasBlackjack: false,
+            wasSplit: false,
+            wasDoubleDown: false,
+            wasSurrender: true,
+            betAmount: bet,
+            dealerName: currentDealer.name,
+            currentStreak: currentStreak,
+            currentBankroll: bankroll,
+            cards: hand.cards.map { $0.displayString }
+        )
+
+        // Phase 8: Record surrender in progression
+        progressionManager.recordHand(
+            won: false,
+            wasBlackjack: false,
+            netProfit: -(bet * 0.5)
+        )
     }
 
     // ┌─────────────────────────────────────────────────────────────────┐
@@ -1392,8 +1458,27 @@ class GameViewModel: ObservableObject {
 
     func endStatisticsSession() {
         if statsManager.hasActiveSession {
+            // Get session data before ending
+            let session = statsManager.currentSession!
+            let duration = session.duration
+            let netProfit = session.netProfit
+            let startingBankroll = session.startingBankroll
+            let wasBankrupt = bankroll < minimumBet
+
+            // End the session
             statsManager.endSession(finalBankroll: bankroll)
             print("📊 Statistics session ended")
+
+            // Phase 8: Check session-based achievements
+            achievementManager.checkAchievementsAfterSession(
+                duration: duration,
+                netProfit: netProfit,
+                startingBankroll: startingBankroll,
+                wasBankrupt: wasBankrupt
+            )
+
+            // Phase 8: Record session in progression
+            progressionManager.recordSession(duration: duration)
         }
     }
 
