@@ -51,6 +51,13 @@ struct SettingsView: View {
     @StateObject private var hapticManager = HapticManager.shared
 
     // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ 🏆 PHASE 8: ACHIEVEMENT & PROGRESSION MANAGERS                       │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    @StateObject private var achievementManager = AchievementManager.shared
+    @StateObject private var progressionManager = ProgressionManager.shared
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
     // │ 🎨 STATE                                                              │
     // └──────────────────────────────────────────────────────────────────────┘
 
@@ -78,6 +85,9 @@ struct SettingsView: View {
             List {
                 // Tutorial & Help section
                 tutorialHelpSection
+
+                // Phase 8: Achievements & Progression section
+                achievementsSection
 
                 // Phase 7: Visual Settings section
                 visualSettingsSection
@@ -190,6 +200,65 @@ struct SettingsView: View {
             Text("Tutorial & Help")
         } footer: {
             Text("Strategy hints provide tips during gameplay based on your hand.")
+        }
+    }
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ 🏆 PHASE 8: ACHIEVEMENTS & PROGRESSION SECTION                       │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    private var achievementsSection: some View {
+        Section {
+            // Achievements navigation
+            NavigationLink(destination: AchievementsView()) {
+                HStack {
+                    Image(systemName: "trophy.fill")
+                        .foregroundColor(.yellow)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Achievements")
+                            .foregroundColor(.white)
+                        Text("\(achievementManager.unlockedCount)/\(achievementManager.totalAchievements) unlocked")
+                            .font(.caption)
+                            .foregroundColor(.mediumGrey)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.mediumGrey)
+                }
+            }
+
+            // Level & XP display
+            HStack {
+                Image(systemName: "star.fill")
+                    .foregroundColor(.blue)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Level \(progressionManager.currentLevel)")
+                        .foregroundColor(.white)
+                    Text(progressionManager.fullRank)
+                        .font(.caption)
+                        .foregroundColor(.mediumGrey)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(progressionManager.formattedTotalXP)
+                        .font(.caption)
+                        .foregroundColor(.info)
+                    if !progressionManager.isMaxLevel {
+                        Text(progressionManager.levelProgressText)
+                            .font(.caption2)
+                            .foregroundColor(.mediumGrey)
+                    }
+                }
+            }
+        } header: {
+            Text("Achievements & Progression")
+        } footer: {
+            if !progressionManager.isMaxLevel {
+                Text("Earn XP by playing hands, winning, and unlocking achievements to level up.")
+            } else {
+                Text("⭐ You've reached max level! Keep playing to unlock all achievements.")
+            }
         }
     }
 

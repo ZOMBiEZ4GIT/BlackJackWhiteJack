@@ -52,6 +52,12 @@ struct GameView: View {
     @State private var showHelp = false
     @State private var showSettings = false
 
+    // Phase 8: Achievement and progression system
+    @StateObject private var achievementManager = AchievementManager.shared
+    @StateObject private var progressionManager = ProgressionManager.shared
+    @State private var showingAchievementUnlock: Achievement? = nil
+    @State private var showingLevelUp: (newLevel: Int, oldLevel: Int)? = nil
+
     // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 🎨 PHASE 7: VISUAL SETTINGS                                          │
     // │                                                                      │
@@ -146,6 +152,48 @@ struct GameView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()
+        }
+        // Phase 8: Achievement unlock overlay
+        .overlay {
+            if let achievement = showingAchievementUnlock {
+                AchievementUnlockView(achievement: achievement) {
+                    showingAchievementUnlock = nil
+                    checkForNextUnlock()
+                }
+            }
+        }
+        // Phase 8: Level up overlay
+        .overlay {
+            if let levelUp = showingLevelUp {
+                LevelUpView(
+                    newLevel: levelUp.newLevel,
+                    rankTitle: progressionManager.rankTitle,
+                    rankEmoji: progressionManager.rankEmoji
+                ) {
+                    showingLevelUp = nil
+                    checkForNextUnlock()
+                }
+            }
+        }
+        // Phase 8: Check for unlocked achievements
+        .onAppear {
+            checkForNextUnlock()
+        }
+    }
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🏆 PHASE 8: ACHIEVEMENT UNLOCK CHECKING                              │
+    // │                                                                      │
+    // │ Purpose: Check for newly unlocked achievements or level-ups         │
+    // │ Shows celebration overlays when achievements or levels are earned   │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    private func checkForNextUnlock() {
+        // Priority: Show level-ups first, then achievements
+        if let levelUp = progressionManager.getNextLevelUp() {
+            showingLevelUp = levelUp
+        } else if let achievement = achievementManager.getNextUnlockedAchievement() {
+            showingAchievementUnlock = achievement
         }
     }
 
