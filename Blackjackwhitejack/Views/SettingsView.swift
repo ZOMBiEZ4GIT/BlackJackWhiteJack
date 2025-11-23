@@ -43,6 +43,14 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ 🎨 PHASE 7: ANIMATION, AUDIO & VISUAL MANAGERS                       │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    @EnvironmentObject var visualSettings: VisualSettingsManager
+    @StateObject private var audioManager = AudioManager.shared
+    @StateObject private var hapticManager = HapticManager.shared
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
     // │ 🎨 STATE                                                              │
     // └──────────────────────────────────────────────────────────────────────┘
 
@@ -70,6 +78,15 @@ struct SettingsView: View {
             List {
                 // Tutorial & Help section
                 tutorialHelpSection
+
+                // Phase 7: Visual Settings section
+                visualSettingsSection
+
+                // Phase 7: Audio Settings section
+                audioSettingsSection
+
+                // Phase 7: Haptic Settings section
+                hapticSettingsSection
 
                 // Gameplay section
                 gameplaySection
@@ -173,6 +190,158 @@ struct SettingsView: View {
             Text("Tutorial & Help")
         } footer: {
             Text("Strategy hints provide tips during gameplay based on your hand.")
+        }
+    }
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ 🎨 PHASE 7: VISUAL SETTINGS SECTION                                  │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    private var visualSettingsSection: some View {
+        Section {
+            // Table Felt Colour picker
+            Picker("Table Felt", selection: $visualSettings.settings.tableFeltColor) {
+                ForEach(TableFeltColor.allColors) { color in
+                    HStack {
+                        Circle()
+                            .fill(color.color)
+                            .frame(width: 20, height: 20)
+                        Text(color.name)
+                    }
+                    .tag(color)
+                }
+            }
+
+            // Card Back Design picker
+            Picker("Card Back", selection: $visualSettings.settings.cardBackDesign) {
+                ForEach(CardBackDesign.allDesigns) { design in
+                    Text(design.name)
+                        .tag(design)
+                }
+            }
+
+            // Animation Speed picker
+            Picker("Animation Speed", selection: $visualSettings.settings.animationSpeed) {
+                ForEach(AnimationSpeed.allCases, id: \.self) { speed in
+                    Text(speed.rawValue.capitalized)
+                        .tag(speed)
+                }
+            }
+
+            // Visual Effects toggles
+            Toggle(isOn: $visualSettings.settings.showCardShadows) {
+                HStack {
+                    Image(systemName: "shadow")
+                        .foregroundColor(.info)
+                    Text("Card Shadows")
+                }
+            }
+            .tint(.info)
+
+            Toggle(isOn: $visualSettings.settings.showGlowEffects) {
+                HStack {
+                    Image(systemName: "sparkles")
+                        .foregroundColor(.warning)
+                    Text("Glow Effects")
+                }
+            }
+            .tint(.info)
+
+            Toggle(isOn: $visualSettings.settings.showParticleEffects) {
+                HStack {
+                    Image(systemName: "sparkle")
+                        .foregroundColor(.success)
+                    Text("Particle Effects")
+                }
+            }
+            .tint(.info)
+
+            Toggle(isOn: $visualSettings.settings.useGradients) {
+                HStack {
+                    Image(systemName: "paintpalette.fill")
+                        .foregroundColor(.info)
+                    Text("Use Gradients")
+                }
+            }
+            .tint(.info)
+        } header: {
+            Text("Visual Settings")
+        } footer: {
+            Text("Customise table appearance and visual effects. Premium colours and card backs available via in-app purchase.")
+        }
+    }
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ 🔊 PHASE 7: AUDIO SETTINGS SECTION                                   │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    private var audioSettingsSection: some View {
+        Section {
+            // Master sound effects toggle
+            Toggle(isOn: Binding(
+                get: { !audioManager.isMuted },
+                set: { _ in audioManager.toggleMute() }
+            )) {
+                HStack {
+                    Image(systemName: audioManager.isMuted ? "speaker.slash.fill" : "speaker.wave.3.fill")
+                        .foregroundColor(.info)
+                    Text("Sound Effects")
+                }
+            }
+            .tint(.info)
+
+            // Master Volume slider
+            if !audioManager.isMuted {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "speaker.fill")
+                            .foregroundColor(.mediumGrey)
+                        Text("Master Volume")
+                        Spacer()
+                        Text("\(Int(audioManager.masterVolume * 100))%")
+                            .foregroundColor(.mediumGrey)
+                    }
+
+                    Slider(value: $audioManager.masterVolume, in: 0...1, step: 0.1)
+                        .tint(.info)
+                }
+            }
+        } header: {
+            Text("Audio Settings")
+        } footer: {
+            Text("Control sound effects and volume. Individual sound controls available in Advanced Audio Settings.")
+        }
+    }
+
+    // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ 📳 PHASE 7: HAPTIC SETTINGS SECTION                                  │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    private var hapticSettingsSection: some View {
+        Section {
+            // Master haptics toggle
+            Toggle(isOn: $hapticManager.isEnabled) {
+                HStack {
+                    Image(systemName: hapticManager.isEnabled ? "hand.tap.fill" : "hand.raised.slash.fill")
+                        .foregroundColor(.info)
+                    Text("Haptic Feedback")
+                }
+            }
+            .tint(.info)
+
+            // Haptic Intensity picker
+            if hapticManager.isEnabled {
+                Picker("Intensity", selection: $hapticManager.intensity) {
+                    ForEach(HapticIntensity.allCases, id: \.self) { intensity in
+                        Text(intensity.rawValue.capitalized)
+                            .tag(intensity)
+                    }
+                }
+            }
+        } header: {
+            Text("Haptic Settings")
+        } footer: {
+            Text("Haptic feedback provides tactile responses for game actions. Respects Reduce Motion accessibility settings.")
         }
     }
 

@@ -53,14 +53,35 @@ struct GameView: View {
     @State private var showSettings = false
 
     // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🎨 PHASE 7: VISUAL SETTINGS                                          │
+    // │                                                                      │
+    // │ Purpose: Access visual customisation settings (table colour, card   │
+    // │          backs, animation preferences, visual effects)              │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    @EnvironmentObject var visualSettings: VisualSettingsManager
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 🎨 BODY - Main Layout                                                │
     // └─────────────────────────────────────────────────────────────────────┘
 
     var body: some View {
         ZStack {
-            // Background - Pure black per spec
-            Color.appBackground
-                .ignoresSafeArea()
+            // ┌─────────────────────────────────────────────────────────────────┐
+            // │ 🎨 PHASE 7: CUSTOMISABLE TABLE BACKGROUND                        │
+            // │                                                                  │
+            // │ Applies selected table felt colour with optional gradient       │
+            // │ Settings controlled via VisualSettingsManager                   │
+            // └─────────────────────────────────────────────────────────────────┘
+
+            // Table felt background
+            if visualSettings.settings.useGradients {
+                visualSettings.settings.tableFeltColor.gradient
+                    .ignoresSafeArea()
+            } else {
+                visualSettings.settings.tableFeltColor.color
+                    .ignoresSafeArea()
+            }
 
             VStack(spacing: 0) {
                 // Top bar with bankroll and controls
@@ -470,8 +491,21 @@ struct GameView: View {
         }
     }
 
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🎨 PHASE 7: ACTION BUTTON WITH FEEDBACK                              │
+    // │                                                                      │
+    // │ Purpose: Styled button with audio/haptic feedback on tap            │
+    // │ All game action buttons trigger multi-sensory feedback              │
+    // └─────────────────────────────────────────────────────────────────────┘
+
     private func actionButton(title: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            // Phase 7: Play button tap feedback (audio + haptic)
+            GameAnimationCoordinator().buttonTapFeedback()
+
+            // Execute the action
+            action()
+        } label: {
             Text(title)
                 .font(.headline)
                 .foregroundColor(.white)
