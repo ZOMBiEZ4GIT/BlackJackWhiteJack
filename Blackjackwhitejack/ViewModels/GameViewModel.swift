@@ -115,6 +115,26 @@ class GameViewModel: ObservableObject {
     private var currentHandActions: [[PlayerAction]] = [[]]
 
     // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🎨 PHASE 7: ANIMATION, AUDIO & HAPTIC MANAGERS                       │
+    // │                                                                      │
+    // │ Purpose: Provide premium multi-sensory feedback for all game actions│
+    // │ Integration: Called throughout game actions to trigger animations,  │
+    // │             sound effects, and haptic feedback                      │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    /// Audio manager for sound effects (Phase 7)
+    private let audioManager = AudioManager.shared
+
+    /// Haptic manager for tactile feedback (Phase 7)
+    private let hapticManager = HapticManager.shared
+
+    /// Animation coordinator for orchestrating all animations (Phase 7)
+    private let animationCoordinator = GameAnimationCoordinator()
+
+    /// Visual settings manager for visual customisation (Phase 7)
+    private let visualSettings = VisualSettingsManager.shared
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
     // │ 📜 CURRENT RULES                                                     │
     // │                                                                      │
     // │ Computed property that returns current dealer's rules               │
@@ -168,40 +188,45 @@ class GameViewModel: ObservableObject {
         // End current statistics session (Phase 4)
         endStatisticsSession()
 
-        // Update dealer
-        currentDealer = newDealer
+        // Phase 7: Animate dealer change
+        animationCoordinator.animateDealerChange { [weak self] in
+            guard let self = self else { return }
 
-        // Create new deck manager with new dealer's deck count
-        deckManager = DeckManager(
-            numberOfDecks: newDealer.rules.numberOfDecks,
-            penetrationThreshold: 0.75
-        )
+            // Update dealer
+            self.currentDealer = newDealer
 
-        // Update minimum bet
-        minimumBet = baseMinimumBet * newDealer.rules.minimumBetMultiplier
-        lastBet = minimumBet
+            // Create new deck manager with new dealer's deck count
+            self.deckManager = DeckManager(
+                numberOfDecks: newDealer.rules.numberOfDecks,
+                penetrationThreshold: 0.75
+            )
 
-        // If switching to Maverick, generate initial random rules
-        if newDealer.name == "Maverick" {
-            let (ruleName, newRules) = maverickGenerator.generateRandomRules()
-            currentMaverickRuleName = ruleName
-            // Update dealer's rules (we'll need to make dealer mutable for this)
-            print("🎲 Maverick starting with: \(ruleName)")
+            // Update minimum bet
+            self.minimumBet = self.baseMinimumBet * newDealer.rules.minimumBetMultiplier
+            self.lastBet = self.minimumBet
+
+            // If switching to Maverick, generate initial random rules
+            if newDealer.name == "Maverick" {
+                let (ruleName, newRules) = self.maverickGenerator.generateRandomRules()
+                self.currentMaverickRuleName = ruleName
+                // Update dealer's rules (we'll need to make dealer mutable for this)
+                print("🎲 Maverick starting with: \(ruleName)")
+            }
+
+            // Reset game state
+            self.playerHands = [Hand()]
+            self.dealerHand = Hand()
+            self.dealerUpcard = nil
+            self.dealerHoleCard = nil
+            self.currentHandIndex = 0
+            self.currentBet = 0
+            self.handBets = []
+            self.resultMessage = ""
+            self.needsReshuffle = false
+            self.gameState = .betting
+
+            print("✅ Dealer switch complete")
         }
-
-        // Reset game state
-        playerHands = [Hand()]
-        dealerHand = Hand()
-        dealerUpcard = nil
-        dealerHoleCard = nil
-        currentHandIndex = 0
-        currentBet = 0
-        handBets = []
-        resultMessage = ""
-        needsReshuffle = false
-        gameState = .betting
-
-        print("✅ Dealer switch complete")
     }
 
     // ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -267,11 +292,16 @@ class GameViewModel: ObservableObject {
         // Notify tutorial manager (Phase 6)
         tutorialManager.notifyActionCompleted(.placeBet)
 
-        // Transition to dealing
-        gameState = .dealing
+        // Phase 7: Animate bet placement with multi-sensory feedback
+        animationCoordinator.animatePlaceBet(amount: amount) { [weak self] in
+            guard let self = self else { return }
 
-        // Start dealing sequence
-        dealInitialCards()
+            // Transition to dealing after bet animation completes
+            self.gameState = .dealing
+
+            // Start dealing sequence
+            self.dealInitialCards()
+        }
     }
 
     // ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -303,6 +333,9 @@ class GameViewModel: ObservableObject {
             needsReshuffle = true
             deckManager.reshuffle()
             needsReshuffle = false
+
+            // Phase 7: Play shuffle sound
+            audioManager.playCardShuffle()
         }
 
         // Deal cards using DeckManager
@@ -327,43 +360,61 @@ class GameViewModel: ObservableObject {
         print("   Player: \(playerHands[0].description)")
         print("   Dealer: \(dealerUpcard!.displayString) + [hidden]")
 
-        // Check for blackjacks
-        let playerHasBlackjack = playerHands[0].isBlackjack
+        // Phase 7: Animate initial deal sequence with audio/haptic feedback
+        animationCoordinator.animateDeal { [weak self] in
+            guard let self = self else { return }
 
-        // For blackjack check, we need to peek at dealer's full hand
-        var dealerFullHand = Hand()
-        dealerFullHand.addCard(initialDeal.dealerUpcard)
-        dealerFullHand.addCard(initialDeal.dealerHoleCard)
-        let dealerHasBlackjack = dealerFullHand.isBlackjack
+            // Check for blackjacks after animation
+            let playerHasBlackjack = self.playerHands[0].isBlackjack
 
-        if playerHasBlackjack || dealerHasBlackjack {
-            // Instant resolution - reveal dealer hole card
-            revealDealerHoleCard()
+            // For blackjack check, we need to peek at dealer's full hand
+            var dealerFullHand = Hand()
+            dealerFullHand.addCard(initialDeal.dealerUpcard)
+            dealerFullHand.addCard(initialDeal.dealerHoleCard)
+            let dealerHasBlackjack = dealerFullHand.isBlackjack
 
-            if playerHasBlackjack && dealerHasBlackjack {
-                // Push - both have blackjack
-                resultMessage = "Push - Both Blackjack!"
-                bankroll += currentBet // Return bet
-                print("🤝 Push - Both have blackjack")
-            } else if playerHasBlackjack {
-                // Phase 3: Player wins - payout per dealer rules
-                let payout = currentBet * (1 + rules.blackjackPayout)
-                bankroll += payout
+            if playerHasBlackjack || dealerHasBlackjack {
+                // Instant resolution - reveal dealer hole card
+                self.revealDealerHoleCard()
 
-                let payoutRatio = rules.blackjackPayout == 1.5 ? "3:2" : "6:5"
-                resultMessage = "Blackjack (\(payoutRatio))! You win $\(formatCurrency(payout - currentBet))!"
-                print("🎉 Player blackjack (\(payoutRatio))! Payout: $\(formatCurrency(payout))")
+                if playerHasBlackjack && dealerHasBlackjack {
+                    // Push - both have blackjack
+                    self.resultMessage = "Push - Both Blackjack!"
+                    self.bankroll += self.currentBet // Return bet
+                    print("🤝 Push - Both have blackjack")
+
+                    // Phase 7: Animate push
+                    self.animationCoordinator.animatePush { [weak self] in
+                        self?.gameState = .result
+                    }
+                } else if playerHasBlackjack {
+                    // Phase 3: Player wins - payout per dealer rules
+                    let payout = self.currentBet * (1 + self.rules.blackjackPayout)
+                    self.bankroll += payout
+
+                    let payoutRatio = self.rules.blackjackPayout == 1.5 ? "3:2" : "6:5"
+                    self.resultMessage = "Blackjack (\(payoutRatio))! You win $\(self.formatCurrency(payout - self.currentBet))!"
+                    print("🎉 Player blackjack (\(payoutRatio))! Payout: $\(self.formatCurrency(payout))")
+
+                    // Phase 7: Animate blackjack celebration
+                    self.animationCoordinator.animateBlackjack(payout: payout) { [weak self] in
+                        self?.gameState = .result
+                    }
+                } else {
+                    // Dealer wins
+                    self.resultMessage = "Dealer Blackjack - You lose"
+                    print("😔 Dealer blackjack - player loses")
+
+                    // Phase 7: Animate loss
+                    self.animationCoordinator.animateLoss { [weak self] in
+                        self?.gameState = .result
+                    }
+                }
             } else {
-                // Dealer wins
-                resultMessage = "Dealer Blackjack - You lose"
-                print("😔 Dealer blackjack - player loses")
+                // Normal play - transition to player's turn
+                self.gameState = .playerTurn
+                print("▶️ Player's turn")
             }
-
-            gameState = .result
-        } else {
-            // Normal play - transition to player's turn
-            gameState = .playerTurn
-            print("▶️ Player's turn")
         }
     }
 
@@ -395,36 +446,48 @@ class GameViewModel: ObservableObject {
             return
         }
 
-        // Add card to current hand
-        playerHands[currentHandIndex].addCard(card)
-        let hand = playerHands[currentHandIndex]
-
         // Track action for statistics
         currentHandActions[currentHandIndex].append(.hit)
 
         // Notify tutorial manager (Phase 6)
         tutorialManager.notifyActionCompleted(.makePlayerAction)
 
-        print("🎴 Player hits: \(card.displayString) → \(hand.description)")
+        print("🎴 Player hits: \(card.displayString)")
 
-        // Check for bust
-        if hand.isBust {
-            print("💥 Player busts with \(hand.total)")
+        // Phase 7: Animate hit with multi-sensory feedback
+        animationCoordinator.animateHit(cardID: card.id) { [weak self] in
+            guard let self = self else { return }
 
-            // If this was the last/only hand, move to dealer turn
-            if currentHandIndex == playerHands.count - 1 {
-                // All hands complete - dealer's turn
-                gameState = .dealerTurn
-                playDealerHand()
-            } else {
-                // Move to next split hand
-                currentHandIndex += 1
-                print("▶️ Moving to hand \(currentHandIndex + 1) of \(playerHands.count)")
+            // Add card to current hand after animation
+            self.playerHands[self.currentHandIndex].addCard(card)
+            let hand = self.playerHands[self.currentHandIndex]
+
+            print("   → \(hand.description)")
+
+            // Check for bust
+            if hand.isBust {
+                print("💥 Player busts with \(hand.total)")
+
+                // Phase 7: Animate bust
+                self.animationCoordinator.animateBust { [weak self] in
+                    guard let self = self else { return }
+
+                    // If this was the last/only hand, move to dealer turn
+                    if self.currentHandIndex == self.playerHands.count - 1 {
+                        // All hands complete - dealer's turn
+                        self.gameState = .dealerTurn
+                        self.playDealerHand()
+                    } else {
+                        // Move to next split hand
+                        self.currentHandIndex += 1
+                        print("▶️ Moving to hand \(self.currentHandIndex + 1) of \(self.playerHands.count)")
+                    }
+                }
+            } else if hand.total == 21 {
+                // Auto-stand on 21 for better UX
+                print("✓ Hand reaches 21 - auto-standing")
+                self.stand()
             }
-        } else if hand.total == 21 {
-            // Auto-stand on 21 for better UX
-            print("✓ Hand reaches 21 - auto-standing")
-            stand()
         }
     }
 
@@ -455,15 +518,20 @@ class GameViewModel: ObservableObject {
 
         print("✋ Player stands on \(hand.displayString)")
 
-        // Check if there are more split hands
-        if currentHandIndex < playerHands.count - 1 {
-            // Move to next split hand
-            currentHandIndex += 1
-            print("▶️ Moving to hand \(currentHandIndex + 1) of \(playerHands.count)")
-        } else {
-            // All hands complete - dealer's turn
-            gameState = .dealerTurn
-            playDealerHand()
+        // Phase 7: Animate stand confirmation with audio/haptic feedback
+        animationCoordinator.animateStand { [weak self] in
+            guard let self = self else { return }
+
+            // Check if there are more split hands
+            if self.currentHandIndex < self.playerHands.count - 1 {
+                // Move to next split hand
+                self.currentHandIndex += 1
+                print("▶️ Moving to hand \(self.currentHandIndex + 1) of \(self.playerHands.count)")
+            } else {
+                // All hands complete - dealer's turn
+                self.gameState = .dealerTurn
+                self.playDealerHand()
+            }
         }
     }
 
@@ -547,20 +615,28 @@ class GameViewModel: ObservableObject {
             return
         }
 
-        playerHands[currentHandIndex].addCard(card)
-        let updatedHand = playerHands[currentHandIndex]
+        print("🎴 Double down card: \(card.displayString)")
 
-        print("🎴 Double down card: \(card.displayString) → \(updatedHand.description)")
+        // Phase 7: Animate double down (bet doubling + card deal)
+        animationCoordinator.animateDoubleDown(cardID: card.id) { [weak self] in
+            guard let self = self else { return }
 
-        // Automatically stand (even if bust)
-        if currentHandIndex < playerHands.count - 1 {
-            // More split hands to play
-            currentHandIndex += 1
-            print("▶️ Moving to hand \(currentHandIndex + 1) of \(playerHands.count)")
-        } else {
-            // All hands complete - dealer's turn
-            gameState = .dealerTurn
-            playDealerHand()
+            // Add card to hand after animation
+            self.playerHands[self.currentHandIndex].addCard(card)
+            let updatedHand = self.playerHands[self.currentHandIndex]
+
+            print("   → \(updatedHand.description)")
+
+            // Automatically stand (even if bust)
+            if self.currentHandIndex < self.playerHands.count - 1 {
+                // More split hands to play
+                self.currentHandIndex += 1
+                print("▶️ Moving to hand \(self.currentHandIndex + 1) of \(self.playerHands.count)")
+            } else {
+                // All hands complete - dealer's turn
+                self.gameState = .dealerTurn
+                self.playDealerHand()
+            }
         }
     }
 
@@ -637,68 +713,73 @@ class GameViewModel: ObservableObject {
 
         print("✂️ Player splits pair - creating 2 hands at $\(splitBet) each")
 
-        // Split the hand
-        let cards = hand.cards
-        var hand1 = Hand(cards: [cards[0]])
-        var hand2 = Hand(cards: [cards[1]])
+        // Phase 7: Animate split with multi-sensory feedback
+        animationCoordinator.animateSplit { [weak self] in
+            guard let self = self else { return }
 
-        // Phase 3: Split aces special handling
-        if isSplittingAces && rules.splitAcesOneCardOnly {
-            print("   ✂️ Splitting aces - one card each (standard rule)")
+            // Split the hand after animation
+            let cards = hand.cards
+            var hand1 = Hand(cards: [cards[0]])
+            var hand2 = Hand(cards: [cards[1]])
 
-            // Deal one card to each hand
-            if let card1 = deckManager.dealCard() {
-                hand1.addCard(card1)
-                print("   Hand 1: \(hand1.description)")
-            }
+            // Phase 3: Split aces special handling
+            if isSplittingAces && self.rules.splitAcesOneCardOnly {
+                print("   ✂️ Splitting aces - one card each (standard rule)")
 
-            if let card2 = deckManager.dealCard() {
-                hand2.addCard(card2)
-                print("   Hand 2: \(hand2.description)")
-            }
+                // Deal one card to each hand
+                if let card1 = self.deckManager.dealCard() {
+                    hand1.addCard(card1)
+                    print("   Hand 1: \(hand1.description)")
+                }
 
-            // Replace current hand and insert new hand
-            playerHands[currentHandIndex] = hand1
-            playerHands.insert(hand2, at: currentHandIndex + 1)
-            handBets.insert(splitBet, at: currentHandIndex + 1)
+                if let card2 = self.deckManager.dealCard() {
+                    hand2.addCard(card2)
+                    print("   Hand 2: \(hand2.description)")
+                }
 
-            // Add actions array for second split hand (Phase 4)
-            currentHandActions.insert([], at: currentHandIndex + 1)
+                // Replace current hand and insert new hand
+                self.playerHands[self.currentHandIndex] = hand1
+                self.playerHands.insert(hand2, at: self.currentHandIndex + 1)
+                self.handBets.insert(splitBet, at: self.currentHandIndex + 1)
 
-            // Auto-stand both hands (split aces one card rule)
-            print("   ✋ Split aces complete - both hands stand")
+                // Add actions array for second split hand (Phase 4)
+                self.currentHandActions.insert([], at: self.currentHandIndex + 1)
 
-            // Move to dealer turn (no more player actions)
-            gameState = .dealerTurn
-            playDealerHand()
+                // Auto-stand both hands (split aces one card rule)
+                print("   ✋ Split aces complete - both hands stand")
 
-        } else {
-            // Normal split or split aces with full play (Lucky, Zen)
-            print("   ✂️ Splitting pair - normal play")
+                // Move to dealer turn (no more player actions)
+                self.gameState = .dealerTurn
+                self.playDealerHand()
 
-            // Deal one card to each hand
-            if let card1 = deckManager.dealCard() {
-                hand1.addCard(card1)
-                print("   Hand 1: \(hand1.description)")
-            }
+            } else {
+                // Normal split or split aces with full play (Lucky, Zen)
+                print("   ✂️ Splitting pair - normal play")
 
-            if let card2 = deckManager.dealCard() {
-                hand2.addCard(card2)
-                print("   Hand 2: \(hand2.description)")
-            }
+                // Deal one card to each hand
+                if let card1 = self.deckManager.dealCard() {
+                    hand1.addCard(card1)
+                    print("   Hand 1: \(hand1.description)")
+                }
 
-            // Replace current hand and insert new hand
-            playerHands[currentHandIndex] = hand1
-            playerHands.insert(hand2, at: currentHandIndex + 1)
-            handBets.insert(splitBet, at: currentHandIndex + 1)
+                if let card2 = self.deckManager.dealCard() {
+                    hand2.addCard(card2)
+                    print("   Hand 2: \(hand2.description)")
+                }
 
-            // Continue playing first split hand
-            print("▶️ Playing hand 1 of \(playerHands.count)")
+                // Replace current hand and insert new hand
+                self.playerHands[self.currentHandIndex] = hand1
+                self.playerHands.insert(hand2, at: self.currentHandIndex + 1)
+                self.handBets.insert(splitBet, at: self.currentHandIndex + 1)
 
-            // Check for instant 21 on first hand (auto-stand)
-            if hand1.total == 21 {
-                print("✓ First split hand is 21 - auto-standing")
-                stand()
+                // Continue playing first split hand
+                print("▶️ Playing hand 1 of \(self.playerHands.count)")
+
+                // Check for instant 21 on first hand (auto-stand)
+                if hand1.total == 21 {
+                    print("✓ First split hand is 21 - auto-standing")
+                    self.stand()
+                }
             }
         }
     }
@@ -762,10 +843,15 @@ class GameViewModel: ObservableObject {
 
         resultMessage = "Surrendered - $\(formatCurrency(refund)) returned"
 
-        // Record surrender in statistics (Phase 4)
-        recordSurrenderHand()
+        // Phase 7: Animate surrender with chip return
+        animationCoordinator.animateSurrender { [weak self] in
+            guard let self = self else { return }
 
-        gameState = .result
+            // Record surrender in statistics (Phase 4)
+            self.recordSurrenderHand()
+
+            self.gameState = .result
+        }
     }
 
     // ╔═══════════════════════════════════════════════════════════════════════════╗
@@ -815,6 +901,9 @@ class GameViewModel: ObservableObject {
 
         print("🎰 Dealer plays: \(dealerHand.description)")
 
+        // Collect dealer card IDs for animation
+        var dealerCardIDs: [String] = []
+
         // ┌─────────────────────────────────────────────────────────────────────┐
         // │ 🤖 DEALER AI - Phase 3: Soft 17 Rule Implementation                 │
         // │                                                                      │
@@ -841,6 +930,7 @@ class GameViewModel: ObservableObject {
             }
 
             dealerHand.addCard(card)
+            dealerCardIDs.append(card.id)
             print("   Dealer hits: \(card.displayString) → \(dealerHand.description)")
 
             if dealerHand.isBust {
@@ -854,8 +944,13 @@ class GameViewModel: ObservableObject {
             print("   ✋ Dealer stands on \(handType) \(dealerHand.total)")
         }
 
-        // Evaluate all results
-        evaluateResults()
+        // Phase 7: Animate dealer turn with all cards
+        animationCoordinator.animateDealerTurn(dealerCardIDs: dealerCardIDs) { [weak self] in
+            guard let self = self else { return }
+
+            // Evaluate all results after dealer turn animation
+            self.evaluateResults()
+        }
     }
 
     // ┌─────────────────────────────────────────────────────────────────────┐
@@ -984,6 +1079,36 @@ class GameViewModel: ObservableObject {
         // Record hands in statistics
         recordHandResults()
 
+        // Phase 7: Animate result based on outcome
+        if netResult > 0 {
+            // Player wins
+            animationCoordinator.animateWin(payout: totalPayout) { [weak self] in
+                guard let self = self else { return }
+                self.checkBankruptcyAndTransition()
+            }
+        } else if netResult == 0 {
+            // Push
+            animationCoordinator.animatePush { [weak self] in
+                guard let self = self else { return }
+                self.checkBankruptcyAndTransition()
+            }
+        } else {
+            // Dealer wins
+            animationCoordinator.animateLoss { [weak self] in
+                guard let self = self else { return }
+                self.checkBankruptcyAndTransition()
+            }
+        }
+    }
+
+    // ┌─────────────────────────────────────────────────────────────────────┐
+    // │ 🏦 CHECK BANKRUPTCY AND TRANSITION                                   │
+    // │                                                                      │
+    // │ Helper method to check bankruptcy after result animation completes  │
+    // │ Phase 7: Separated from evaluateResults to call after animations    │
+    // └─────────────────────────────────────────────────────────────────────┘
+
+    private func checkBankruptcyAndTransition() {
         // Check for bankruptcy
         if bankroll < minimumBet {
             print("💸 Bankrupt! Balance ($\(bankroll)) < minimum bet ($\(minimumBet))")
@@ -1016,28 +1141,33 @@ class GameViewModel: ObservableObject {
             return
         }
 
-        // Clear hands
-        playerHands = [Hand()]
-        dealerHand = Hand()
-        dealerUpcard = nil
-        dealerHoleCard = nil
-        currentHandIndex = 0
+        // Phase 7: Animate transition to next hand
+        animationCoordinator.animateNextHand { [weak self] in
+            guard let self = self else { return }
 
-        // Reset bets
-        currentBet = 0
-        handBets = []
+            // Clear hands
+            self.playerHands = [Hand()]
+            self.dealerHand = Hand()
+            self.dealerUpcard = nil
+            self.dealerHoleCard = nil
+            self.currentHandIndex = 0
 
-        // Clear result message
-        resultMessage = ""
+            // Reset bets
+            self.currentBet = 0
+            self.handBets = []
 
-        // Check for reshuffle
-        if deckManager.needsReshuffle {
-            print("♠️ Shuffle indicator - will reshuffle before next deal")
-            needsReshuffle = true
+            // Clear result message
+            self.resultMessage = ""
+
+            // Check for reshuffle
+            if self.deckManager.needsReshuffle {
+                print("♠️ Shuffle indicator - will reshuffle before next deal")
+                self.needsReshuffle = true
+            }
+
+            print("▶️ Ready for next hand")
+            self.gameState = .betting
         }
-
-        print("▶️ Ready for next hand")
-        gameState = .betting
     }
 
     // ┌─────────────────────────────────────────────────────────────────────┐
